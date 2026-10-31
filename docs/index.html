@@ -76,7 +76,7 @@
 </main>
 
 <footer>
-  Demo data: 19 sample images. All embeddings on this page were computed by the real
+  <span id="corpusInfo">Demo data loading…</span> All embeddings on this page were computed by the real
   OpenCLIP model running on the project's own server, and scores are computed live in
   your browser with the same rule the server uses (cosine × 100, near-duplicates
   above 0.98 suppressed).<br>
@@ -135,6 +135,7 @@ function runTextQuery(q) {
 
 function init() {
   $("modelBadge").textContent = "Model: " + DATA.model + " · " + DATA.images.length + " images indexed";
+  $("corpusInfo").textContent = "Demo data: " + DATA.images.length + " images — a small sample set plus real photos fetched live from Bing Images and Pinterest search (reverse-engineered public pages, no paid APIs).";
   const dl = $("qlist"), chips = $("chips");
   for (const { q } of DATA.queries) {
     const o = document.createElement("option"); o.value = q; dl.appendChild(o);

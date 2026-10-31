@@ -157,7 +157,8 @@ def thumb(image_id: int) -> FileResponse:
         try:
             img = Image.open(src)
             img.load()
-            img.convert("RGB").thumbnail((320, 320))
+            img = img.convert("RGB")
+            img.thumbnail((320, 320))
             img.save(thumb_path, "JPEG", quality=80)
         except Exception:
             raise HTTPException(status_code=404, detail="image file unreadable")

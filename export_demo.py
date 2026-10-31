@@ -20,22 +20,22 @@ THUMBS_OUT = os.path.join(DOCS, "thumbs")
 os.makedirs(THUMBS_OUT, exist_ok=True)
 
 QUERIES = [
-    "red car on a road",
-    "green tree in a field",
-    "sunset over purple mountains",
-    "an orange cat face",
+    "a cat",
+    "a dog",
+    "red car",
     "a sailboat on the sea",
-    "snowy mountain peak",
-    "house with a red roof",
-    "night sky with stars and moon",
-    "desert dunes at noon",
-    "fresh green apple",
+    "snowy mountain",
+    "desert landscape",
+    "green tree",
+    "modern house",
+    "an apple",
+    "ocean sunset",
+    "an elephant",
+    "colorful flowers",
+    "an orange cat face",
     "pink hearts pattern",
     "black and white checkerboard",
-    "big red sun on blue sky",
-    "purple abstract circles",
-    "a yellow circle",
-    "red and white stripes",
+    "green tree in a field",
 ]
 
 
@@ -59,7 +59,8 @@ def main():
         dst = os.path.join(THUMBS_OUT, f"{iid}.jpg")
         img = Image.open(os.path.join(core.BASE_DIR, row["image_path"]))
         img.load()
-        img.convert("RGB").thumbnail((320, 320))
+        img = img.convert("RGB")
+        img.thumbnail((320, 320))
         img.save(dst, "JPEG", quality=80)
         images.append({
             "id": iid,

@@ -6,3 +6,4 @@ data/images/*
 data/thumbs/*
 !data/images/.gitkeep
 !data/thumbs/.gitkeep
+demo/

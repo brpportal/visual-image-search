@@ -1,5 +1,10 @@
 # Visual Image Search — self-hosted, on your phone
 
+**▶ Live public demo: https://brpportal.github.io/visual-image-search/**
+(19 sample images; embeddings precomputed by the real model, scores computed
+live in your browser with the same ranking rule as the server. The full
+version below adds photo upload, free-text queries and your own crawl.)
+
 Upload a reference image (or type words) and get the **top 50 most similar
 images from your own index**, each with a similarity score (0–100%), a
 thumbnail, and a link back to the page/post it came from.

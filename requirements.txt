@@ -1,0 +1,12 @@
+# Install torch FIRST from the CPU wheel index (see setup.sh), then these.
+fastapi
+uvicorn
+python-multipart
+open_clip_torch
+faiss-cpu
+pillow
+imagehash
+requests
+beautifulsoup4
+# The crawler uses requests + BeautifulSoup (light, reliable in proot).
+# Scrapy is a supported alternative but is NOT required by this codebase.

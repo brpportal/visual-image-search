@@ -1,0 +1,8 @@
+# One public page URL per line. The crawler reads the page's images,
+# respects robots.txt, waits 1-2s between requests, skips login pages,
+# and stores only images at least 200x200 px.
+# Lines starting with # are ignored.
+#
+# Examples (replace with your own public pages/galleries):
+# https://example.com/gallery
+# https://your-site.org/photos

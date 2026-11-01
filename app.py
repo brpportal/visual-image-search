@@ -179,6 +179,47 @@ def thumb(image_id: int) -> FileResponse:
     return FileResponse(thumb_path, media_type="image/jpeg")
 
 
+@app.get("/scan")
+def scan(q: str, limit: int = 60):
+    """SCAN mode (scan.py): ONE query -> overall sweep of web + YouTube
+    + public Facebook/Instagram via OG adapters, ranked by our CLIP."""
+    import scan as scanmod
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    q = (q or "").strip()
+    if not q:
+        return {"error": "empty query"}
+    try:
+        cands = scanmod.harvest(q)
+    except Exception as exc:
+        return {"error": f"harvest failed: {type(exc).__name__}"}
+    from collections import Counter
+    counts = dict(Counter(c["origin"] for c in cands))
+    cands = cands[: max(10, min(limit, 120))]
+    with _TPE(max_workers=8) as ex:
+        ok = [d for d in ex.map(scanmod._download, cands) if d]
+    if not ok:
+        return {"query": q, "counts": counts, "total": 0, "results": []}
+    vecs = core.embed_pil_images([d["img"] for d in ok])
+    _q = core.embed_text(q)
+    qv = _q[0] if _q.ndim == 2 else _q
+    scores = (vecs @ qv).tolist()
+    order = sorted(range(len(ok)), key=lambda i: -scores[i])
+    kept, kept_idx = [], []
+    for i in order:
+        if kept_idx and float((vecs[kept_idx] @ vecs[i]).max()) > 0.98:
+            continue
+        kept.append(i)
+        kept_idx.append(i)
+        if len(kept) >= 24:
+            break
+    return {"query": q, "counts": counts, "total": len(ok),
+            "results": [{"score": round(scores[i] * 100, 1),
+                         "origin": ok[i]["origin"],
+                         "thumb_url": ok[i]["image_url"],
+                         "source_url": ok[i]["source_url"],
+                         "title": ok[i]["title"]} for i in kept]}
+
+
 app.mount("/images", StaticFiles(directory=core.IMAGES_DIR), name="images")
 app.mount("/", StaticFiles(directory=os.path.join(core.BASE_DIR, "static"),
                            html=True), name="static")

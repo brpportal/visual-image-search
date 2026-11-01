@@ -144,18 +144,10 @@ def search_by_text(q: str = Query(..., min_length=1),
     return JSONResponse(search_vectors(vec, k))
 
 
-@app.get("/live")
-def live_web_search(q: str = Query(..., min_length=1),
-                    k: int = Query(24, ge=1, le=50)) -> JSONResponse:
-    """Realtime web image search — the Google/Bing/Pinterest behaviour.
-
-    Engines are queried at this moment (Bing Images + Pinterest, via the
-    reverse-engineered routes in webfetch.py); the photos they return are
-    embedded and ranked live. NOTHING is read from the local index.
-    Results are cached per query for a few minutes (see livesearch.py).
-    """
-    import livesearch
-    return JSONResponse(livesearch.live_search(q, k))
+# NOTE (2026-11-01, Al's order): the old /live route — realtime search
+# riding Bing Images + Pinterest via webfetch/livesearch — is REMOVED.
+# Kisi aur ka image engine backend nahi chalega; overall search ke liye
+# hamara apna SCAN system hai (/scan, /imagescan, scan.py).
 
 
 @app.get("/thumb/{image_id}")

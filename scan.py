@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """SCAN mode — ONE search, overall scan (Al's spec, 2026-11-01).
 
-One query sweeps every public surface at the same time:
-  * web image results (Bing + Pinterest public pages — discovery only,
-    used to FIND public images/pages; extraction + matching is ours)
-  * YouTube search results (thumbnails, no login)
-  * Facebook / Instagram URLs discovered in the results, harvested
-    through the OG crawler route (social.py, no login)
-  * Instagram hashtag pages (crawler UA)
+ONE query sweeps every public surface at the same time — with OUR OWN
+pipeline only. No Bing / Pinterest / Google image engines anywhere
+(Al's standing order): candidates come from
+  * YouTube search (platform adapter, no login)
+  * Wikimedia Commons — a public media library our system reads
+    directly, like any website
+  * our own crawler over seed sites (--sites), following topic links
+  * Facebook / Instagram pages found along the way, harvested through
+    the OG crawler route (social.py, no login)
 Every candidate is downloaded once, embedded with CLIP and ranked
 against the query text (or, with --tag, matched against a reference
 set too). Sources that answer with a login wall are reported as
@@ -31,10 +33,13 @@ import requests
 from PIL import Image
 
 import core
+import crawl
 import social
-import webfetch
 
 MIN_DIM = 150
+HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/124.0 Safari/537.36"}
 
 
 def youtube_search(session: requests.Session, query: str,
@@ -55,101 +60,111 @@ def youtube_search(session: requests.Session, query: str,
             for v in ids]
 
 
-def discover_social(session: requests.Session,
-                    query: str) -> dict[str, list[str]]:
-    """Find public Facebook/Instagram page/post URLs for the query in
-    public WEB search results (the phone book) — the pages themselves
-    are then harvested by our own OG adapters. Bing wraps outbound
-    links as bing.com/ck/a?...&u=a1<base64url-of-target>, so decode
-    those too."""
-    import base64
-    urls: dict[str, list[str]] = {"facebook": [], "instagram": []}
-    for kind in ("facebook", "instagram"):
-        try:
-            r = session.get(
-                "https://www.bing.com/search?q="
-                + urllib.parse.quote_plus(f"{query} {kind}"), timeout=20)
-            raw = re.findall(r'href="(https?://[^"&]+)', r.text)
-            raw += re.findall(r'[?&]u=a1([A-Za-z0-9_-]+)', r.text)
-            for u in raw:
-                if "bing.com" in u and "a1" not in u:
-                    continue
-                if not u.startswith("http"):
-                    try:
-                        pad = "=" * (-len(u) % 4)
-                        u = base64.urlsafe_b64decode(u + pad).decode(
-                            "utf-8", "ignore")
-                    except Exception:
-                        continue
-                u = u.replace("&amp;", "&")
-                if f"{kind}.com" not in u:
-                    continue
-                if any(b in u for b in ("/sharer", "/dialog", "/plugins",
-                                        "/tr?", "login")):
-                    continue
-                if u not in urls[kind]:
-                    urls[kind].append(u)
-        except Exception:
-            pass
-    return urls
+def commons_search(session: requests.Session, query: str,
+                   limit: int = 50) -> list[dict]:
+    """Wikimedia Commons — a public media LIBRARY (a content host our
+    system reads directly through its own API, like any website).
+    source_url is the real Commons file page."""
+    params = {
+        "action": "query", "format": "json", "generator": "search",
+        "gsrsearch": f"{query} filetype:bitmap", "gsrnamespace": 6,
+        "gsrlimit": limit, "prop": "imageinfo",
+        "iiprop": "url|size", "iiurlwidth": 500,
+    }
+    try:
+        r = session.get("https://commons.wikimedia.org/w/api.php",
+                        params=params, timeout=25)
+        r.raise_for_status()
+        pages = (r.json().get("query") or {}).get("pages") or {}
+    except Exception as exc:
+        print(f"  [commons] failed: {type(exc).__name__}")
+        return []
+    out = []
+    for p in pages.values():
+        ii = (p.get("imageinfo") or [{}])[0]
+        if (ii.get("width") or 0) < MIN_DIM or \
+                (ii.get("height") or 0) < MIN_DIM:
+            continue
+        out.append({
+            "image_url": ii.get("thumburl") or ii.get("url"),
+            "source_url": ii.get("descriptionurl"),
+            "title": (p.get("title") or "Commons file").replace(
+                "File:", ""),
+            "origin": "commons"})
+    return out
 
 
-def harvest(query: str) -> list[dict]:
+def crawl_topic(session: requests.Session, query: str,
+                sites: list[str], max_pages: int = 8,
+                per_page: int = 20) -> list[dict]:
+    """Our own crawler over seed sites: harvest page images, follow
+    same-site links whose URL carries a topic word (1 level deep)."""
+    words = [w for w in re.findall(r"[a-z0-9]+", query.lower())
+             if len(w) >= 4]
+    out: list[dict] = []
+    seen_pages: set[str] = set()
+
+    def visit(url: str, depth: int) -> None:
+        if url in seen_pages or len(seen_pages) >= max_pages:
+            return
+        seen_pages.add(url)
+        page = crawl.fetch_page(session, url)
+        if page is None:
+            return
+        soup = page["soup"]
+        for img_url, alt in crawl.extract_images(soup, url)[:per_page]:
+            out.append({"image_url": img_url, "source_url": url,
+                        "title": alt or page["title"], "origin": "web"})
+        if depth > 0:
+            for link in crawl.extract_links(soup, url,
+                                            same_host_only=True):
+                if any(w in link.lower() for w in words):
+                    visit(link, depth - 1)
+
+    for s in sites:
+        visit(s, 1)
+    return out
+
+
+def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
+    """Overall sweep — OUR pipeline only (no image-search engines):
+    YouTube adapter + Commons library + own crawl of seed sites +
+    OG harvest of any social pages found along the way."""
     session = requests.Session()
-    session.headers.update(webfetch.HEADERS)
+    session.headers.update(HEADERS)
     found: dict[str, dict] = {}
 
     def add(item: dict) -> None:
-        found.setdefault(item["image_url"], item)
+        if item.get("image_url"):
+            found.setdefault(item["image_url"], item)
 
-    for item in webfetch.bing_search(session, query, want=80):
-        item = dict(item, origin="web")
-        add(item)
-    for item in webfetch.pinterest_search(session, query):
-        add(dict(item, origin="web"))
     for item in youtube_search(session, query):
         add(item)
+    for item in commons_search(session, query):
+        add(item)
+    if sites:
+        for item in crawl_topic(session, query, sites):
+            add(item)
 
-    # Targeted discovery passes: social pages rarely surface in plain
-    # image results, so look for them by name — only their page URLs
-    # are used (routed to the OG adapters below), images stay "web".
-    for suffix in ("facebook", "instagram"):
-        for item in webfetch.bing_search(session, f"{query} {suffix}",
-                                         want=30):
-            add(dict(item, origin="web"))
-
-    # Social discovery: URLs inside image results + a web-search pass
+    # Social pages found inside the harvested set -> OG adapters
     social_urls = [i["source_url"] for i in list(found.values())
-                   if "facebook.com" in i["source_url"]
-                   or "instagram.com" in i["source_url"]]
-    disc = discover_social(session, query)
-    social_urls += disc["facebook"][:4] + disc["instagram"][:4]
-    print("social urls discovered:",
-          {k: len(v) for k, v in disc.items()})
+                   if i.get("source_url") and (
+                       "facebook.com" in i["source_url"]
+                       or "instagram.com" in i["source_url"])]
     for u in list(dict.fromkeys(social_urls))[:8]:
         kind = "facebook" if "facebook.com" in u else "instagram"
         got = social.ADAPTERS[kind](u)
         if not got:
-            print(f"  [LOGIN_REQUIRED] {u[:80]} — public data nahi mila; "
-                  f"gehra analysis login se hoga")
+            print(f"  [LOGIN_REQUIRED] {u[:80]} — public data nahi "
+                  f"mila; gehra analysis login se hoga")
         for item in got:
             add(dict(item, origin=kind))
-
-    # Instagram hashtag pages for the query's words (crawler UA)
-    words = [w for w in re.findall(r"[a-z0-9]+", query.lower())
-             if len(w) >= 4]
-    tags = list(dict.fromkeys(words))[:2]
-    for tag in tags:
-        got = social.instagram_images(
-            f"https://www.instagram.com/explore/tags/{tag}/")
-        for item in got:
-            add(dict(item, origin="instagram"))
     return list(found.values())
 
 
 def _download(item: dict) -> dict | None:
     try:
-        r = requests.get(item["image_url"], headers=webfetch.HEADERS,
+        r = requests.get(item["image_url"], headers=HEADERS,
                          timeout=15)
         r.raise_for_status()
         img = Image.open(io.BytesIO(r.content))
@@ -167,12 +182,16 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=150)
     ap.add_argument("--tag", default="",
                     help="also match against references with this tag")
+    ap.add_argument("--sites", default="",
+                    help="comma-separated seed sites for our own "
+                         "crawler (topic-guided, 1 level deep)")
     ap.add_argument("--save", default="",
                     help="folder to save the top results into")
     args = ap.parse_args()
 
     print(f"SCAN: {args.query!r} — overall sweep shuru")
-    cands = harvest(args.query)
+    sites = [s.strip() for s in args.sites.split(",") if s.strip()]
+    cands = harvest(args.query, sites=sites)
     from collections import Counter
     print("harvested by origin:", dict(Counter(
         c["origin"] for c in cands)), "| total:", len(cands))

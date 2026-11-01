@@ -36,6 +36,18 @@
 <div id="status"></div>
 <div id="counts"></div>
 <div class="grid" id="grid"></div>
+
+<header style="padding-top:4px">
+  <h1>🖼️ IMAGE SCAN — Apni Image Do, Overall Dhoondo</h1>
+  <p class="sub">Apna logo/photo upload karo + topic likho — system overall sweep karke har mili image ko TUMHARI image se match karega (copy, edited, group ke andar — tiles deep-match ke saath). Ye hamara apna scan + match hai.</p>
+</header>
+<form id="f2">
+  <input type="file" id="file" accept="image/*" style="flex:1">
+  <input id="topic" placeholder="Topic e.g. Al Mudafioon" style="flex:1">
+  <button>Image Scan</button>
+</form>
+<div id="status2"></div>
+<div class="grid" id="grid2"></div>
 <script>
 const f = document.getElementById('f'), q = document.getElementById('q'),
       status = document.getElementById('status'), counts = document.getElementById('counts'),
@@ -62,6 +74,37 @@ f.addEventListener('submit', async (e) => {
       grid.appendChild(a);
     }
   } catch (err) { status.textContent = 'Network error: ' + err; }
+});
+
+const f2 = document.getElementById('f2'), fileEl = document.getElementById('file'),
+      topicEl = document.getElementById('topic'),
+      status2 = document.getElementById('status2'), grid2 = document.getElementById('grid2');
+f2.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!fileEl.files.length) { status2.textContent = 'Pehle image choose karo'; return; }
+  if (!topicEl.value.trim()) { status2.textContent = 'Topic likho (kis naam par scan karun)'; return; }
+  status2.textContent = 'Image scan chal raha hai… overall sweep + matching (30-90 sec)';
+  grid2.innerHTML = '';
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch('/imagescan?q=' + encodeURIComponent(topicEl.value), { method: 'POST', body: fd });
+    const data = await r.json();
+    if (data.error) { status2.textContent = 'Error: ' + data.error; return; }
+    const c = data.counts || {};
+    status2.textContent = 'Image scan mukammal ✅ | Harvest: ' +
+      Object.entries(c).map(([k, v]) => k + ' ' + v).join(' · ') +
+      ' | ' + data.total + ' images tumhari image se match huin (sab se zyada match upar)';
+    for (const item of data.results) {
+      const a = document.createElement('a');
+      a.href = item.source_url; a.target = '_blank';
+      a.innerHTML = '<div class="card"><img loading="lazy" src="' + item.thumb_url + '">' +
+        '<div class="meta"><span class="score">' + item.score + '% match</span>' +
+        '<span class="origin">' + item.origin + '</span>' +
+        '<div class="title">' + (item.title || '').slice(0, 60) + '</div></div></div>';
+      grid2.appendChild(a);
+    }
+  } catch (err) { status2.textContent = 'Network error: ' + err; }
 });
 </script>
 </body>

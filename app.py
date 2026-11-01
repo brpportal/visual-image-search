@@ -220,6 +220,69 @@ def scan(q: str, limit: int = 60):
                          "title": ok[i]["title"]} for i in kept]}
 
 
+@app.post("/imagescan")
+async def imagescan(file: UploadFile = File(...), q: str = "",
+                    limit: int = 60):
+    """IMAGE SCAN — the hunter flow as a web test: upload a reference
+    image (e.g. your logo) + a topic; the system sweeps the web +
+    YouTube + public social (OG) for candidates, then matches EVERY
+    candidate against YOUR image with our own CLIP + tile deep-match
+    (edited / group-image forms included), full spectrum, no hiding."""
+    import scan as scanmod
+    import hunter as huntermod
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    raw = await file.read()
+    try:
+        ref = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        return {"error": "uploaded image unreadable"}
+    query = (q or "").strip()
+    if not query:
+        return {"error": "topic (q) required — kis naam/topic par "
+                         "overall scan karun?"}
+    try:
+        cands = scanmod.harvest(query)
+    except Exception as exc:
+        return {"error": f"harvest failed: {type(exc).__name__}"}
+    from collections import Counter
+    counts = dict(Counter(c["origin"] for c in cands))
+    cands = cands[: max(10, min(limit, 120))]
+    with _TPE(max_workers=8) as ex:
+        ok = [d for d in ex.map(scanmod._download, cands) if d]
+    if not ok:
+        return {"query": query, "counts": counts, "total": 0,
+                "results": []}
+    ref_vec = core.embed_pil_images([ref])[0]
+    vecs = core.embed_pil_images([d["img"] for d in ok])
+    scores = (vecs @ ref_vec).tolist()
+    todo = [i for i, s in enumerate(scores) if 0.25 <= s < 0.90]
+    if todo:  # deep match: tiles rescue edited / in-group copies
+        views, owners = [], []
+        for i in todo:
+            for v in huntermod.views_of(ok[i]["img"]):
+                views.append(v)
+                owners.append(i)
+        vs = (core.embed_pil_images(views) @ ref_vec).tolist()
+        for j, i in enumerate(owners):
+            if vs[j] > scores[i]:
+                scores[i] = vs[j]
+    order = sorted(range(len(ok)), key=lambda i: -scores[i])
+    kept, kept_idx = [], []
+    for i in order:
+        if kept_idx and float((vecs[kept_idx] @ vecs[i]).max()) > 0.98:
+            continue
+        kept.append(i)
+        kept_idx.append(i)
+        if len(kept) >= 24:
+            break
+    return {"query": query, "counts": counts, "total": len(ok),
+            "results": [{"score": round(scores[i] * 100, 1),
+                         "origin": ok[i]["origin"],
+                         "thumb_url": ok[i]["image_url"],
+                         "source_url": ok[i]["source_url"],
+                         "title": ok[i]["title"]} for i in kept]}
+
+
 app.mount("/images", StaticFiles(directory=core.IMAGES_DIR), name="images")
 app.mount("/", StaticFiles(directory=os.path.join(core.BASE_DIR, "static"),
                            html=True), name="static")

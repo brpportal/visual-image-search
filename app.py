@@ -144,6 +144,20 @@ def search_by_text(q: str = Query(..., min_length=1),
     return JSONResponse(search_vectors(vec, k))
 
 
+@app.get("/live")
+def live_web_search(q: str = Query(..., min_length=1),
+                    k: int = Query(24, ge=1, le=50)) -> JSONResponse:
+    """Realtime web image search — the Google/Bing/Pinterest behaviour.
+
+    Engines are queried at this moment (Bing Images + Pinterest, via the
+    reverse-engineered routes in webfetch.py); the photos they return are
+    embedded and ranked live. NOTHING is read from the local index.
+    Results are cached per query for a few minutes (see livesearch.py).
+    """
+    import livesearch
+    return JSONResponse(livesearch.live_search(q, k))
+
+
 @app.get("/thumb/{image_id}")
 def thumb(image_id: int) -> FileResponse:
     thumb_path = os.path.join(core.THUMBS_DIR, f"{image_id}.jpg")

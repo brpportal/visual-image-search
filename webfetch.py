@@ -58,10 +58,12 @@ def bing_search(session: requests.Session, query: str, want: int) -> list[dict]:
                 continue
             window = doc[m.start():m.start() + 1600]
             purl = re.search(r'"purl":"(https?://[^"]+)"', window)
+            turl = re.search(r'"turl":"(https?://[^"]+)"', window)
             title = re.search(r'"t":"([^"]{1,160})"', window)
             seen.add(url)
             out.append({
                 "image_url": url,
+                "thumb_url": turl.group(1) if turl else url,
                 "source_url": purl.group(1) if purl else
                               f"https://www.bing.com/images/search?q={quote_plus(query)}",
                 "title": (title.group(1) if title else query).strip(),

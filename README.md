@@ -75,6 +75,23 @@ Keep the Termux session alive while serving (Termux: `termux-wake-lock`
 helps). To use it again tomorrow: `proot-distro login ubuntu`, `cd
 visual-image-search`, `bash run.sh`.
 
+## Live web search (no index needed)
+
+The server's default mode is **Live Web**: type any query and the engines
+are asked *at that moment* — Bing Images and Pinterest, via the
+reverse-engineered routes in `webfetch.py` — then the returned photos are
+embedded with CLIP, ranked, de-duplicated and shown with scores and source
+links. Nothing is read from the local index; every search is fresh web
+results, like Google Images. First search for a query takes ~20–35 s
+(engine fetch + downloads + embedding); repeats are cached for 10 minutes.
+
+- Endpoint: `GET /live?q=biryani&k=24`
+- Standalone: `python livesearch.py "purple sports car"`
+- Google Images is not a live source: it serves only a JS shell to
+  non-browser clients (verified directly and with REA static analysis).
+- The **My Index** tab in the UI is the original offline mode over your
+  own crawled/indexed images (`/search`).
+
 ## Quick self-test (20 sample images)
 
 ```bash

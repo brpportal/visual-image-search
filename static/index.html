@@ -36,6 +36,9 @@
            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .open { display: inline-block; margin-top: 7px; font-size: 12.5px; color: var(--acc);
           text-decoration: none; font-weight: 600; }
+  .taboff { background: var(--card); color: var(--dim); border: 1px solid var(--line); }
+  .engine { display: inline-block; margin-left: 8px; font-size: 11px; color: var(--dim);
+            border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; }
   .spinner { display:none; margin: 18px auto; width: 34px; height: 34px; border-radius: 50%;
              border: 4px solid var(--line); border-top-color: var(--acc);
              animation: spin 0.8s linear infinite; }
@@ -45,16 +48,20 @@
 <body>
 <header>
   <h1>🔎 Visual Image Search</h1>
-  <div class="sub">Search your own indexed images — by picture or by words. Runs 100% on this phone.</div>
+  <div class="sub" id="modeSub">Live mode: results are fetched from the web right now (Bing Images + Pinterest) and ranked by CLIP — nothing comes from a stored index.</div>
 </header>
 
 <div class="controls">
+  <div class="row" role="tablist">
+    <button id="tabLive" type="button">🌐 Live Web</button>
+    <button id="tabIndex" type="button" class="taboff">📁 My Index</button>
+  </div>
   <div class="row">
-    <input id="q" type="text" placeholder="Describe an image… e.g. red sunset over mountains">
+    <input id="q" type="text" placeholder="Describe an image… e.g. biryani, purple sports car">
     <button id="textBtn" type="button">Search</button>
   </div>
   <div class="drop" id="drop">
-    📷 Tap to upload a reference image (or drop it here)
+    📷 Tap to upload a reference image (or drop it here) — Index mode only
     <img id="preview" alt="query preview">
   </div>
   <input id="file" type="file" accept="image/*" hidden>
@@ -81,7 +88,8 @@ function setLoading(on, msg) {
 function render(results) {
   grid.innerHTML = '';
   if (!results.length) { statusEl.textContent = 'No results.'; return; }
-  statusEl.textContent = results.length + ' result(s)';
+  statusEl.textContent = results.length + ' result(s)' +
+    (results[0].engine ? ' · fetched live just now' : '');
   for (const r of results) {
     const card = document.createElement('div');
     card.className = 'card';
@@ -105,6 +113,12 @@ function render(results) {
     link.textContent = 'Open source ↗';
     meta.appendChild(title);
     meta.appendChild(link);
+    if (r.engine) {
+      const chip = document.createElement('span');
+      chip.className = 'engine';
+      chip.textContent = r.engine === 'bing' ? 'via Bing' : 'via Pinterest';
+      meta.appendChild(chip);
+    }
     card.appendChild(img);
     card.appendChild(badge);
     card.appendChild(meta);
@@ -112,8 +126,8 @@ function render(results) {
   }
 }
 
-async function runSearch(url, options) {
-  setLoading(true, 'Searching…');
+async function runSearch(url, options, loadingMsg) {
+  setLoading(true, loadingMsg || 'Searching…');
   grid.innerHTML = '';
   try {
     const resp = await fetch(url, options);
@@ -127,9 +141,35 @@ async function runSearch(url, options) {
   }
 }
 
+let mode = 'live';
+const tabLive = document.getElementById('tabLive');
+const tabIndex = document.getElementById('tabIndex');
+const modeSub = document.getElementById('modeSub');
+function setMode(m) {
+  mode = m;
+  tabLive.classList.toggle('taboff', m !== 'live');
+  tabIndex.classList.toggle('taboff', m !== 'index');
+  drop.style.display = m === 'live' ? 'none' : '';
+  modeSub.textContent = m === 'live'
+    ? 'Live mode: results are fetched from the web right now (Bing Images + Pinterest) and ranked by CLIP — nothing comes from a stored index.'
+    : 'Index mode: search your own indexed images — by picture or by words. Runs 100% on this device.';
+  q.placeholder = m === 'live'
+    ? 'Describe an image… e.g. biryani, purple sports car'
+    : 'Describe an image… e.g. red sunset over mountains';
+}
+tabLive.addEventListener('click', () => setMode('live'));
+tabIndex.addEventListener('click', () => setMode('index'));
+setMode('live');
+
 document.getElementById('textBtn').addEventListener('click', () => {
   const text = q.value.trim();
-  if (text) runSearch('/search?q=' + encodeURIComponent(text) + '&k=50');
+  if (!text) return;
+  if (mode === 'live') {
+    runSearch('/live?q=' + encodeURIComponent(text) + '&k=24', undefined,
+      '🌐 Searching the live web (Bing + Pinterest)… this can take 10–30 seconds');
+  } else {
+    runSearch('/search?q=' + encodeURIComponent(text) + '&k=50');
+  }
 });
 q.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('textBtn').click(); });
 
@@ -144,6 +184,7 @@ fileInput.addEventListener('change', () => {
 });
 
 function searchWithFile(file) {
+  if (mode !== 'index') setMode('index');
   preview.src = URL.createObjectURL(file);
   preview.style.display = 'block';
   const form = new FormData();

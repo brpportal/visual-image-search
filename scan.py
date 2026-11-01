@@ -2,14 +2,14 @@
 """SCAN mode — ONE search, overall scan (Al's spec, 2026-11-01).
 
 ONE query sweeps every public surface at the same time — with OUR OWN
-pipeline only. No Bing / Pinterest / Google image engines anywhere
-(Al's standing order): candidates come from
-  * YouTube search (platform adapter, no login)
-  * Wikimedia Commons — a public media library our system reads
-    directly, like any website
-  * our own crawler over seed sites (--sites), following topic links
-  * Facebook / Instagram pages found along the way, harvested through
-    the OG crawler route (social.py, no login)
+pipeline. The technique (Al's spec) is SEARCH ON SEARCH:
+  * the tool asks several search engines for the query — but takes
+    ONLY page/post LINKS from them, never their image results;
+  * OUR engine then VISITS each link itself and extracts the images
+    from the actual website/post (social posts via OG adapters);
+  * plus platform/library sources read directly: YouTube search
+    adapter and the Wikimedia Commons media library;
+  * plus our own crawler over seed sites (--sites).
 Every candidate is downloaded once, embedded with CLIP and ranked
 against the query text (or, with --tag, matched against a reference
 set too). Sources that answer with a login wall are reported as
@@ -34,6 +34,7 @@ from PIL import Image
 
 import core
 import crawl
+import hunter as huntermod
 import social
 
 MIN_DIM = 150
@@ -94,6 +95,25 @@ def commons_search(session: requests.Session, query: str,
     return out
 
 
+def _fetch_soup(session: requests.Session, url: str):
+    """Visit a page OURSELVES (the Search-on-Search rule: engines give
+    links, we do the visiting). Returns (soup, title) or None."""
+    from bs4 import BeautifulSoup
+    try:
+        r = session.get(url, timeout=25)
+        r.raise_for_status()
+    except Exception:
+        return None
+    if "text/html" not in r.headers.get("Content-Type", "text/html"):
+        return None
+    if crawl.looks_like_login_page(r.url, r.text[:4000]):
+        return None
+    soup = BeautifulSoup(r.text, "html.parser")
+    title = (soup.title.string.strip()
+             if soup.title and soup.title.string else url)
+    return soup, title
+
+
 def crawl_topic(session: requests.Session, query: str,
                 sites: list[str], max_pages: int = 8,
                 per_page: int = 20) -> list[dict]:
@@ -108,16 +128,15 @@ def crawl_topic(session: requests.Session, query: str,
         if url in seen_pages or len(seen_pages) >= max_pages:
             return
         seen_pages.add(url)
-        page = crawl.fetch_page(session, url)
-        if page is None:
+        got = _fetch_soup(session, url)
+        if got is None:
             return
-        soup = page["soup"]
-        for img_url, alt in crawl.extract_images(soup, url)[:per_page]:
+        soup, title = got
+        for img_url in crawl.candidate_image_urls(soup, url)[:per_page]:
             out.append({"image_url": img_url, "source_url": url,
-                        "title": alt or page["title"], "origin": "web"})
+                        "title": title, "origin": "web"})
         if depth > 0:
-            for link in crawl.extract_links(soup, url,
-                                            same_host_only=True):
+            for link in huntermod.page_links(soup, url):
                 if any(w in link.lower() for w in words):
                     visit(link, depth - 1)
 
@@ -126,10 +145,115 @@ def crawl_topic(session: requests.Session, query: str,
     return out
 
 
+def bing_links(session: requests.Session, query: str,
+               limit: int = 12) -> list[str]:
+    """Bing WEB results -> sirf page links (u=a1<base64> decode).
+    Engine ki IMAGES kabhi nahi — sirf links."""
+    import base64
+    try:
+        r = session.get("https://www.bing.com/search?q="
+                        + urllib.parse.quote_plus(query), timeout=25)
+        r.raise_for_status()
+    except Exception as exc:
+        print(f"  [links:bing] {type(exc).__name__}")
+        return []
+    doc = r.text.replace("&amp;", "&")
+    out = []
+    for m in re.findall(r'[?&]u=a1([A-Za-z0-9_-]+)', doc):
+        try:
+            pad = "=" * (-len(m) % 4)
+            u = base64.urlsafe_b64decode(m + pad).decode("utf-8",
+                                                        "ignore")
+        except Exception:
+            continue
+        if u.startswith("http") and "bing.com" not in u \
+                and "microsoft.com" not in u:
+            out.append(u)
+    return list(dict.fromkeys(out))[:limit]
+
+
+def ddg_links(session: requests.Session, query: str,
+              limit: int = 12) -> list[str]:
+    """DuckDuckGo HTML results -> sirf page/post links (uddg decode)."""
+    try:
+        r = session.get("https://html.duckduckgo.com/html/?q="
+                        + urllib.parse.quote_plus(query), timeout=25)
+        r.raise_for_status()
+    except Exception as exc:
+        print(f"  [links:ddg] {type(exc).__name__}")
+        return []
+    out = []
+    for href in re.findall(r'class="result__a" href="([^"]+)"', r.text):
+        m = re.search(r'uddg=([^&]+)', href)
+        u = urllib.parse.unquote(m.group(1)) if m else href
+        if u.startswith("http"):
+            out.append(u)
+    return list(dict.fromkeys(out))[:limit]
+
+
+def discover_links(session: requests.Session, query: str,
+                   per_engine: int = 10) -> list[str]:
+    """SEARCH ON SEARCH: engines se sirf LINKS uthao (query + facebook
+    + instagram variants taake posts bhi ayen). Images engine ki kabhi
+    nahi — har link ko hamara engine khud visit karega."""
+    links: list[str] = []
+    seen: set[str] = set()
+    for q in (query, f"{query} facebook", f"{query} instagram"):
+        for fn in (ddg_links, bing_links):
+            for u in fn(session, q, per_engine):
+                key = u.split("#")[0]
+                if key not in seen and "duckduckgo.com" not in key:
+                    seen.add(key)
+                    links.append(u)
+    print(f"  [search-on-search] {len(links)} links mile "
+          f"(sirf links — images hamara engine nikale ga)")
+    return links[:36]
+
+
+def visit_links(session: requests.Session, links: list[str],
+                per_page: int = 20, max_pages: int = 24) -> list[dict]:
+    """Har link ko hamara engine KHUD visit karta hai: aam websites se
+    page ki images, social posts/pages se OG adapters ke zariye."""
+    import time as _time
+    out: list[dict] = []
+    for u in links[:max_pages]:
+        _time.sleep(0.4)
+        if "facebook.com" in u or "instagram.com" in u:
+            kind = "facebook" if "facebook.com" in u else "instagram"
+            got = social.ADAPTERS[kind](u)
+            if not got:
+                print(f"  [LOGIN_REQUIRED] {u[:80]} — public data nahi "
+                      f"mila; gehra analysis login se hoga")
+            for item in got:
+                out.append(dict(item, origin=kind))
+            continue
+        if "youtube.com/watch" in u:
+            m = re.search(r"v=([\w-]{11})", u)
+            if m:
+                out.append({
+                    "image_url": f"https://i.ytimg.com/vi/{m.group(1)}"
+                                 f"/hqdefault.jpg",
+                    "source_url": u, "title": "YouTube video",
+                    "origin": "youtube"})
+            continue
+        if "youtube.com/" in u:
+            for item in social.youtube_images(u):
+                out.append(dict(item, origin="youtube"))
+            continue
+        got = _fetch_soup(session, u)
+        if got is None:
+            continue
+        soup, title = got
+        for img_url in crawl.candidate_image_urls(soup, u)[:per_page]:
+            out.append({"image_url": img_url, "source_url": u,
+                        "title": title, "origin": "web"})
+    return out
+
+
 def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
-    """Overall sweep — OUR pipeline only (no image-search engines):
-    YouTube adapter + Commons library + own crawl of seed sites +
-    OG harvest of any social pages found along the way."""
+    """Overall sweep — SEARCH ON SEARCH upar, baqi sources neeche:
+    engine links -> hamara visit; YouTube adapter; Commons library;
+    --sites par apna crawler."""
     session = requests.Session()
     session.headers.update(HEADERS)
     found: dict[str, dict] = {}
@@ -138,6 +262,9 @@ def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
         if item.get("image_url"):
             found.setdefault(item["image_url"], item)
 
+    links = discover_links(session, query)
+    for item in visit_links(session, links):
+        add(item)
     for item in youtube_search(session, query):
         add(item)
     for item in commons_search(session, query):
@@ -145,20 +272,6 @@ def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
     if sites:
         for item in crawl_topic(session, query, sites):
             add(item)
-
-    # Social pages found inside the harvested set -> OG adapters
-    social_urls = [i["source_url"] for i in list(found.values())
-                   if i.get("source_url") and (
-                       "facebook.com" in i["source_url"]
-                       or "instagram.com" in i["source_url"])]
-    for u in list(dict.fromkeys(social_urls))[:8]:
-        kind = "facebook" if "facebook.com" in u else "instagram"
-        got = social.ADAPTERS[kind](u)
-        if not got:
-            print(f"  [LOGIN_REQUIRED] {u[:80]} — public data nahi "
-                  f"mila; gehra analysis login se hoga")
-        for item in got:
-            add(dict(item, origin=kind))
     return list(found.values())
 
 

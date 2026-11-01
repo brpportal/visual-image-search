@@ -100,7 +100,7 @@ def _fetch_soup(session: requests.Session, url: str):
     links, we do the visiting). Returns (soup, title) or None."""
     from bs4 import BeautifulSoup
     try:
-        r = session.get(url, timeout=25)
+        r = session.get(url, timeout=14)
         r.raise_for_status()
     except Exception:
         return None
@@ -155,7 +155,7 @@ def bing_links(session: requests.Session, query: str,
     import base64
     try:
         r = session.get("https://www.bing.com/search?q="
-                        + urllib.parse.quote_plus(query), timeout=25)
+                        + urllib.parse.quote_plus(query), timeout=12)
         r.raise_for_status()
     except Exception as exc:
         print(f"  [links:bing] {type(exc).__name__}")
@@ -180,7 +180,7 @@ def ddg_links(session: requests.Session, query: str,
     """DuckDuckGo HTML results -> sirf page/post links (uddg decode)."""
     try:
         r = session.get("https://html.duckduckgo.com/html/?q="
-                        + urllib.parse.quote_plus(query), timeout=25)
+                        + urllib.parse.quote_plus(query), timeout=12)
         r.raise_for_status()
     except Exception as exc:
         print(f"  [links:ddg] {type(exc).__name__}")
@@ -225,7 +225,7 @@ def _external_links(soup, own_hosts: tuple, limit: int) -> list[str]:
 def _engine_get(session, url: str, name: str):
     from bs4 import BeautifulSoup
     try:
-        r = session.get(url, timeout=15)
+        r = session.get(url, timeout=10)
         return BeautifulSoup(r.text, "html.parser")
     except Exception as exc:
         print(f"  [links:{name}] {type(exc).__name__}")

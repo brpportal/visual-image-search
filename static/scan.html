@@ -69,6 +69,28 @@
   #preview img { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
   .foot { text-align: center; color: #475569; font-size: 12px; margin-top: 26px; line-height: 1.6; }
   a { color: inherit; text-decoration: none; }
+  body { padding-bottom: 86px; }
+  .bottombar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+               background: rgba(10,15,22,.92); backdrop-filter: blur(10px);
+               border-top: 1px solid var(--line); display: flex;
+               justify-content: space-around; padding: 8px 6px calc(8px + env(safe-area-inset-bottom)); }
+  .bottombar button { flex: 1; margin: 0 4px; padding: 11px 4px; border-radius: 12px;
+               background: rgba(255,255,255,.05); color: var(--mut);
+               border: 1px solid var(--line); font-size: 13.5px; font-weight: 700; }
+  .bottombar button.active { background: linear-gradient(90deg, var(--acc), var(--acc2));
+               color: #04160b; border-color: transparent; }
+  .loadmore { display: none; width: 100%; margin-top: 14px; padding: 13px;
+               border-radius: 12px; border: 1px solid rgba(45,212,191,.4);
+               background: rgba(45,212,191,.08); color: #a7f3ea;
+               font-weight: 800; font-size: 14.5px; cursor: pointer; }
+  .ogpanel { display: none; margin-top: 14px; gap: 12px; padding: 12px;
+               border: 1px solid var(--line); border-radius: 14px; background: #0d1420; }
+  .ogpanel.on { display: flex; }
+  .ogpanel img { width: 86px; height: 86px; object-fit: cover; border-radius: 10px; background: #070b11; }
+  .ogpanel .ot { font-weight: 800; font-size: 15px; line-height: 1.35; }
+  .ogpanel .od { color: var(--mut); font-size: 12.5px; margin-top: 4px; line-height: 1.5; }
+  .ogpanel .om { color: #64748b; font-size: 11.5px; margin-top: 5px; }
+  .dims { font-size: 11px; padding: 2.5px 8px; border-radius: 999px; background: rgba(196,181,253,.15); color: #c4b5fd; }
 </style>
 </head>
 <body>
@@ -79,7 +101,7 @@
 </div>
 
 <div class="wrap">
-  <div class="panel">
+  <div class="panel sec" id="panel-scan">
     <h2>🌐 Overall Scan</h2>
     <p class="hint">Koi bhi topic likho — system search engines se website/post links uthayega, har link visit karke wahan ki sari images jama karega, aur phir unhein rank karega.</p>
     <form id="f">
@@ -90,9 +112,10 @@
     <div class="stage" id="stage1"></div>
     <div class="chips" id="chips1"></div>
     <div class="grid" id="grid1"></div>
+    <button class="loadmore" id="more1"></button>
   </div>
 
-  <div class="panel">
+  <div class="panel sec" id="panel-image" style="display:none">
     <h2>🖼️ Image Scan — Apni Image Do, Overall Dhoondo</h2>
     <p class="hint">Apna logo/photo upload karo + topic likho — overall sweep ki har image tumhari image se match hogi (copy, edited, group ke andar wali bhi — tiles deep-match ke saath).</p>
     <form id="f2">
@@ -105,10 +128,31 @@
     <div class="stage" id="stage2"></div>
     <div class="chips" id="chips2"></div>
     <div class="grid" id="grid2"></div>
+    <button class="loadmore" id="more2"></button>
+  </div>
+
+  <div class="panel sec" id="panel-url" style="display:none">
+    <h2>🔗 URL Scan — Sirf Ek URL, Deep Analysis</h2>
+    <p class="hint">Koi bhi ek URL do (website page, Facebook/Instagram page ya post, YouTube video/channel) — engine sirf usi URL ko deeply analysis karega: wahan mojood SARI images + OG data (title, description, og:image). Videos ke posters/thumbnails bhi shamil hain.</p>
+    <form id="f3">
+      <input type="text" id="urlin" placeholder="e.g. https://www.dawateislami.net ya facebook page ka link">
+      <button id="btn3">URL Scan</button>
+    </form>
+    <div class="stage" id="stage3"></div>
+    <div class="ogpanel" id="ogpanel"></div>
+    <div class="chips" id="chips3"></div>
+    <div class="grid" id="grid3"></div>
+    <button class="loadmore" id="more3"></button>
   </div>
 
   <p class="foot">Apna engine: Search-on-Search discovery · khud visits · CLIP matching · spectrum 100% → 1%<br>
   Jahan profile par login ki deewar aye, system LOGIN_REQUIRED batata hai.</p>
+</div>
+
+<div class="bottombar">
+  <button data-panel="panel-scan" class="active">🌐 Overall</button>
+  <button data-panel="panel-image">🖼️ Image</button>
+  <button data-panel="panel-url">🔗 URL Scan</button>
 </div>
 
 <script>
@@ -130,24 +174,52 @@ function renderChips(el, job) {
   el.innerHTML = h;
 }
 
-function renderResults(gridEl, data, matchWord) {
-  gridEl.innerHTML = '';
-  for (const item of data.results) {
-    const a = document.createElement('a');
-    a.href = item.source_url; a.target = '_blank'; a.rel = 'noopener';
-    a.innerHTML = `<div class="card"><img loading="lazy" src="${esc(item.thumb_url)}" alt="">
-      <div class="meta"><div class="row1">
-        <span class="score ${sClass(item.score)}">${item.score}%${matchWord ? ' match' : ''}</span>
-        <span class="org">${esc(item.origin)}</span>
-        ${item.via && item.via !== 'Direct' ? `<span class="via">via ${esc(item.via)}</span>` : ''}
-      </div>
-      <div class="ttl">${esc((item.title || '').slice(0, 64))}</div>
-      <div class="dom">${esc(dom(item.source_url))}</div></div></div>`;
-    gridEl.appendChild(a);
-  }
+const PAGE = 50;
+const gridState = {};
+
+function cardHTML(item, matchWord) {
+  const badge = (item.score === null || item.score === undefined)
+    ? `<span class="dims">${item.w || '?'}×${item.h || '?'}</span>`
+    : `<span class="score ${sClass(item.score)}">${item.score}%${matchWord ? ' match' : ''}</span>`;
+  return `<div class="card"><img loading="lazy" src="${esc(item.thumb_url)}" alt="">
+    <div class="meta"><div class="row1">
+      ${badge}
+      <span class="org">${esc(item.origin)}</span>
+      ${item.via && item.via !== 'Direct' ? `<span class="via">via ${esc(item.via)}</span>` : ''}
+    </div>
+    <div class="ttl">${esc((item.title || '').slice(0, 64))}</div>
+    <div class="dom">${esc(dom(item.source_url))}</div></div></div>`;
 }
 
-async function pollJob(jobId, stageEl, chipsEl, gridEl, btn, matchWord) {
+function renderResults(gridEl, data, matchWord) {
+  const moreBtn = document.getElementById('more' + gridEl.id.slice(-1));
+  gridState[gridEl.id] = { items: data.results, shown: 0, matchWord };
+  gridEl.innerHTML = '';
+  const step = () => {
+    const st = gridState[gridEl.id];
+    const next = st.items.slice(st.shown, st.shown + PAGE);
+    for (const item of next) {
+      const a = document.createElement('a');
+      a.href = item.source_url; a.target = '_blank'; a.rel = 'noopener';
+      a.innerHTML = cardHTML(item, st.matchWord);
+      gridEl.appendChild(a);
+    }
+    st.shown += next.length;
+    if (st.shown < st.items.length) {
+      moreBtn.style.display = 'block';
+      moreBtn.textContent = `⬇ Load More — ${st.shown}/${st.items.length} dikha diye, baqi ${st.items.length - st.shown}`;
+    } else {
+      moreBtn.style.display = st.items.length > PAGE ? 'block' : 'none';
+      moreBtn.textContent = `✅ Kul ${st.items.length} results — sab dikha diye`;
+      moreBtn.disabled = true;
+    }
+  };
+  moreBtn.onclick = step;
+  moreBtn.disabled = false;
+  step();
+}
+
+async function pollJob(jobId, stageEl, chipsEl, gridEl, btn, matchWord, onDone) {
   stageEl.classList.add('on');
   gridEl.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>';
   const t0 = Date.now();
@@ -167,9 +239,10 @@ async function pollJob(jobId, stageEl, chipsEl, gridEl, btn, matchWord) {
       renderChips(chipsEl, job);
     } else if (job.state === 'done') {
       const d = job.result;
-      stageEl.innerHTML = `✅ Mukammal — <b>${d.total}</b> images check huin, top ${d.results.length} results neeche hain <span style="color:#64748b">(${secs}s)</span>`;
+      stageEl.innerHTML = `✅ Mukammal — <b>${d.total}</b> images mili/check huin, kul ${d.results.length} results (50 ik waqt me — Load More se baqi) <span style="color:#64748b">(${secs}s)${d.cached ? ' · ⚡ cache se' : ''}</span>`;
       renderChips(chipsEl, { links: job.links, harvested: d.counts });
       renderResults(gridEl, d, matchWord);
+      if (onDone) onDone(d);
       break;
     } else {
       stageEl.innerHTML = '❌ Error: ' + esc(job.error || 'kuch ghalat ho gaya');
@@ -180,17 +253,19 @@ async function pollJob(jobId, stageEl, chipsEl, gridEl, btn, matchWord) {
   btn.disabled = false;
 }
 
-async function startJob(url, opts, els, matchWord) {
+async function startJob(url, opts, els, matchWord, onDone) {
   const { stageEl, chipsEl, gridEl, btn } = els;
   btn.disabled = true;
   chipsEl.innerHTML = ''; gridEl.innerHTML = '';
+  const mb = document.getElementById('more' + gridEl.id.slice(-1));
+  if (mb) mb.style.display = 'none';
   stageEl.classList.add('on');
   stageEl.innerHTML = '<span class="pulse"></span>Scan shuru ho raha hai…';
   try {
     const r = await fetch(url, opts);
     const data = await r.json();
     if (data.error) { stageEl.innerHTML = '❌ ' + esc(data.error); btn.disabled = false; return; }
-    await pollJob(data.job_id, stageEl, chipsEl, gridEl, btn, matchWord);
+    await pollJob(data.job_id, stageEl, chipsEl, gridEl, btn, matchWord, onDone);
   } catch (e) {
     stageEl.innerHTML = '❌ Network error — page refresh karke dobara try karo';
     btn.disabled = false;
@@ -221,6 +296,35 @@ $('f2').addEventListener('submit', e => {
   const sites = $('sites2').value.trim();
   startJob('/imagescan/start?q=' + encodeURIComponent(topic) + (sites ? '&sites=' + encodeURIComponent(sites) : ''), { method: 'POST', body: fd },
     { stageEl: $('stage2'), chipsEl: $('chips2'), gridEl: $('grid2'), btn: $('btn2') }, true);
+});
+
+document.querySelectorAll('.bottombar button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.bottombar button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.sec').forEach(p => p.style.display = 'none');
+    document.getElementById(b.dataset.panel).style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+$('f3').addEventListener('submit', e => {
+  e.preventDefault();
+  const u = $('urlin').value.trim();
+  if (!u) return;
+  $('ogpanel').classList.remove('on');
+  $('ogpanel').innerHTML = '';
+  startJob('/urlscan/start?url=' + encodeURIComponent(u), undefined,
+    { stageEl: $('stage3'), chipsEl: $('chips3'), gridEl: $('grid3'), btn: $('btn3') }, false,
+    d => {
+      const m = d.meta || {};
+      const og = $('ogpanel');
+      og.innerHTML = `${m.og_image ? `<img src="${esc(m.og_image)}" alt="">` : ''}
+        <div><div class="ot">${esc(m.title || '(title nahi mila)')}</div>
+        <div class="od">${esc(m.description || '')}</div>
+        <div class="om">${esc(d.url)}${m.site_name ? ' · ' + esc(m.site_name) : ''}${m.type ? ' · ' + esc(m.type) : ''} · kul ${d.total} images is URL par</div></div>`;
+      og.classList.add('on');
+    });
 });
 </script>
 </body>

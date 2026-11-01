@@ -171,7 +171,42 @@ def thumb(image_id: int) -> FileResponse:
     return FileResponse(thumb_path, media_type="image/jpeg")
 
 
-TOP_RESULTS = 48
+TOP_RESULTS = 200
+
+_JUNK_URL = ("emoji", "sprite", "favicon", "1x1", "/tr?", "tr?id=",
+             "pixel", "blank.", "spacer", "s32x32", "32x32", "36x36",
+             "/icons/", "loading.", "gravatar")
+
+
+def _download_enough(cands, want_ok: int = 130, max_try: int = 340):
+    """Waves me download karo jab tak KAFI achhi images na mil jayen
+    (pehle sirf pehli 200 try hoti theen — 27% success par funnel
+    bhookha reh jata tha). Junk URLs pehle skip; aakhir me bari
+    images (pixel area) pehle taake embed unhi par ho jo matter
+    karti hain; embed set cap 110."""
+    import scan as scanmod
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    pool = [c for c in cands
+            if not any(j in c["image_url"].lower() for j in _JUNK_URL)]
+    ok: list = []
+    idx = 0
+    while idx < min(len(pool), max_try) and len(ok) < want_ok:
+        wave = pool[idx: idx + 56]
+        idx += len(wave)
+        with _TPE(max_workers=16) as ex:
+            ok.extend(d for d in ex.map(scanmod._download, wave) if d)
+    ok.sort(key=lambda d: -(d["img"].width * d["img"].height))
+    return ok[:110]
+
+
+_SCAN_CACHE: dict = {}
+
+
+def _cache_get(key):
+    hit = _SCAN_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    return None
 
 
 def _result_item(d: dict, score: float) -> dict:
@@ -205,14 +240,18 @@ def _scan_compute(q: str, limit: int = 200, on_event=None,
     q = (q or "").strip()
     if not q:
         return {"error": "empty query"}
+    key = (q.lower(), tuple(sorted(sites or [])))
+    cached = _cache_get(key)
+    if cached is not None:
+        if on_event:
+            on_event("harvested", cached["counts"])
+        return dict(cached, cached=True)
     try:
         cands = scanmod.harvest(q, sites=sites, on_event=on_event)
     except Exception as exc:
         return {"error": f"harvest failed: {type(exc).__name__}"}
     counts = dict(Counter(c["origin"] for c in cands))
-    cands = cands[: max(10, min(limit, 240))]
-    with _TPE(max_workers=12) as ex:
-        ok = [d for d in ex.map(scanmod._download, cands) if d]
+    ok = _download_enough(cands)
     if not ok:
         return {"query": q, "counts": counts, "total": 0, "results": []}
     vecs = core.embed_pil_images([d["img"] for d in ok])
@@ -220,8 +259,10 @@ def _scan_compute(q: str, limit: int = 200, on_event=None,
     qv = _q[0] if _q.ndim == 2 else _q
     scores = (vecs @ qv).tolist()
     kept = _top_kept(ok, vecs, scores)
-    return {"query": q, "counts": counts, "total": len(ok),
-            "results": [_result_item(ok[i], scores[i]) for i in kept]}
+    result = {"query": q, "counts": counts, "total": len(ok),
+              "results": [_result_item(ok[i], scores[i]) for i in kept]}
+    _SCAN_CACHE[key] = (time.time(), result)
+    return result
 
 
 def _imagescan_compute(ref, query: str, limit: int = 180,
@@ -242,9 +283,7 @@ def _imagescan_compute(ref, query: str, limit: int = 180,
     except Exception as exc:
         return {"error": f"harvest failed: {type(exc).__name__}"}
     counts = dict(Counter(c["origin"] for c in cands))
-    cands = cands[: max(10, min(limit, 240))]
-    with _TPE(max_workers=12) as ex:
-        ok = [d for d in ex.map(scanmod._download, cands) if d]
+    ok = _download_enough(cands)
     if not ok:
         return {"query": query, "counts": counts, "total": 0,
                 "results": []}
@@ -283,6 +322,127 @@ def scan(q: str, limit: int = 200, sites: str = ""):
     return _scan_compute(q, limit, sites=_parse_sites(sites))
 
 
+def _fetch_meta(url: str) -> dict:
+    """Page ka OG/meta data: title, description, og:image, site."""
+    import requests as _rq
+    import scan as scanmod
+    import social as socialmod
+    from bs4 import BeautifulSoup
+    headers = (socialmod.CRAWLER_HEADERS
+               if ("facebook.com" in url or "instagram.com" in url)
+               else scanmod.HEADERS)
+    try:
+        r = _rq.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        def og(prop):
+            tag = soup.find("meta", property=prop) or \
+                soup.find("meta", attrs={"name": prop})
+            return (tag.get("content") or "").strip() if tag else ""
+
+        desc_tag = soup.find("meta", attrs={"name": "description"})
+        return {
+            "title": og("og:title") or (soup.title.string.strip()
+                                        if soup.title and
+                                        soup.title.string else ""),
+            "description": og("og:description") or
+                           ((desc_tag.get("content") or "").strip()
+                            if desc_tag else ""),
+            "og_image": og("og:image"),
+            "site_name": og("og:site_name"),
+            "type": og("og:type"),
+        }
+    except Exception:
+        return {"title": "", "description": "", "og_image": "",
+                "site_name": "", "type": ""}
+
+
+def _urlscan_compute(url: str, on_event=None) -> dict:
+    """ONLY URL SCAN — ek hi URL ki DEEP analysis: page par mojood
+    SARI images (photos + video posters + embed thumbnails) + OG/meta
+    data. Social URL ho to OG adapters se gehri public harvest."""
+    import re as _re
+    import scan as scanmod
+    import social as socialmod
+    url = (url or "").strip()
+    if not url:
+        return {"error": "URL likho"}
+    if not url.startswith("http"):
+        url = "https://" + url
+    if on_event:
+        on_event("stage", {"text": "page visit ho raha hai…"})
+    meta = _fetch_meta(url)
+    items: list[dict] = []
+    if "facebook.com" in url or "instagram.com" in url:
+        kind = "facebook" if "facebook.com" in url else "instagram"
+        got = socialmod.ADAPTERS[kind](url)
+        if not got:
+            return {"error": "is social page se public data nahi mila "
+                             "(login wall) — LOGIN_REQUIRED",
+                    "url": url, "meta": meta}
+        items = [dict(it, origin=kind) for it in got]
+    elif "youtube.com" in url or "youtu.be" in url:
+        m = _re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([\w-]{11})",
+                       url)
+        if m:
+            items = [{"image_url": f"https://i.ytimg.com/vi/"
+                                   f"{m.group(1)}/hqdefault.jpg",
+                      "source_url": url, "title": meta["title"],
+                      "origin": "youtube"}]
+        else:
+            items = [dict(it, origin="youtube")
+                     for it in socialmod.youtube_images(url)]
+    else:
+        got = scanmod._fetch_soup(_session_for_scan(), url)
+        if got is None:
+            return {"error": "page khul nahi saka (band, login wall "
+                             "ya JS-only site?)", "url": url,
+                    "meta": meta}
+        soup, title = got
+        import crawl as crawlmod
+        items = [{"image_url": iu, "source_url": url,
+                  "title": title, "origin": "url"}
+                 for iu in crawlmod.candidate_image_urls(soup, url)]
+        if not meta["title"]:
+            meta["title"] = title
+    if on_event:
+        on_event("stage", {"text": f"{len(items)} images mili — "
+                                   f"download + analysis ho raha hai…"})
+        from collections import Counter
+        on_event("harvested", dict(Counter(i["origin"] for i in items)))
+    ok = _download_enough(items, want_ok=len(items) or 1,
+                          max_try=min(len(items), 200))
+    results = [{"score": None, "origin": d["origin"], "via": "",
+                "thumb_url": d["image_url"], "source_url": url,
+                "title": d.get("title", ""),
+                "w": d["img"].width, "h": d["img"].height}
+               for d in ok]
+    results.sort(key=lambda r: -(r["w"] * r["h"]))
+    return {"url": url, "meta": meta,
+            "counts": {items[0]["origin"] if items else "url":
+                       len(items)},
+            "total": len(results), "results": results}
+
+
+def _session_for_scan():
+    import requests as _rq
+    import scan as scanmod
+    s = _rq.Session()
+    s.headers.update(scanmod.HEADERS)
+    return s
+
+
+@app.get("/urlscan")
+def urlscan(url: str):
+    return _urlscan_compute(url)
+
+
+@app.get("/urlscan/start")
+def urlscan_start(url: str):
+    return {"job_id": _start_job(
+        lambda ev: _urlscan_compute(url, ev))}
+
+
 @app.post("/imagescan")
 async def imagescan(file: UploadFile = File(...), q: str = "",
                     limit: int = 180, sites: str = ""):
@@ -312,7 +472,9 @@ def _start_job(fn) -> str:
     JOBS[job_id] = job
 
     def on_event(kind, data):
-        if kind == "links":
+        if kind == "stage":
+            job["stage"] = data.get("text", job["stage"])
+        elif kind == "links":
             job["links"] = data
             job["stage"] = (f"{data['total']} links mile — pages "
                             f"visit ho rahi hain…")

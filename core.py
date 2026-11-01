@@ -91,16 +91,27 @@ def get_model():
 
 
 def embed_pil_images(pil_images) -> "object":
-    """Embed a list of PIL images -> float32 numpy array (n, 512), L2-normalized."""
+    """Embed a list of PIL images -> float32 numpy array (n, 512),
+    L2-normalized. Preprocess parallel (8 threads) + encode 32 ke
+    chunks me — bari lists par pehle se kai guna tez."""
     import numpy as np
     import torch
+    from concurrent.futures import ThreadPoolExecutor as _TPE
 
     model, preprocess, _ = get_model()
-    batch = torch.stack([preprocess(img.convert("RGB")) for img in pil_images])
+    imgs = [img.convert("RGB") for img in pil_images]
+    with _TPE(max_workers=8) as ex:
+        tensors = list(ex.map(preprocess, imgs))
+    outs = []
     with torch.no_grad():
-        feats = model.encode_image(batch)
-    feats = feats / feats.norm(dim=-1, keepdim=True)
-    return feats.cpu().numpy().astype(np.float32)
+        for i in range(0, len(tensors), 32):
+            batch = torch.stack(tensors[i:i + 32])
+            feats = model.encode_image(batch)
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+            outs.append(feats.cpu().numpy().astype(np.float32))
+    if not outs:
+        return np.zeros((0, 512), dtype=np.float32)
+    return np.concatenate(outs, axis=0)
 
 
 def embed_text(text: str) -> "object":

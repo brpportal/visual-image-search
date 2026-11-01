@@ -100,7 +100,7 @@ def _fetch_soup(session: requests.Session, url: str):
     links, we do the visiting). Returns (soup, title) or None."""
     from bs4 import BeautifulSoup
     try:
-        r = session.get(url, timeout=14)
+        r = session.get(url, timeout=10)
         r.raise_for_status()
     except Exception:
         return None
@@ -341,7 +341,7 @@ def discover_links(session: requests.Session, query: str,
 
 
 def visit_links(session: requests.Session, links: list,
-                per_page: int = 40, max_pages: int = 30) -> list[dict]:
+                per_page: int = 40, max_pages: int = 24) -> list[dict]:
     """Har link ko hamara engine KHUD visit karta hai: aam websites se
     page ki SARI images (ek link = kai images), social posts/pages se
     OG adapters ke zariye. Visits parallel hain (6 workers) taake

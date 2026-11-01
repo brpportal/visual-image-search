@@ -178,25 +178,30 @@ _JUNK_URL = ("emoji", "sprite", "favicon", "1x1", "/tr?", "tr?id=",
              "/icons/", "loading.", "gravatar")
 
 
-def _download_enough(cands, want_ok: int = 130, max_try: int = 340):
+def _download_enough(cands, want_ok: int = 130, max_try: int = 340,
+                     budget_s: int = 32):
     """Waves me download karo jab tak KAFI achhi images na mil jayen
     (pehle sirf pehli 200 try hoti theen — 27% success par funnel
-    bhookha reh jata tha). Junk URLs pehle skip; aakhir me bari
-    images (pixel area) pehle taake embed unhi par ho jo matter
-    karti hain; embed set cap 110."""
+    bhookha reh jata tha). TIME BUDGET bhi hai: budget khatam to jo
+    mila usi par aage ka kaam — scan latakta nahi. Junk URLs pehle
+    skip; aakhir me bari images (pixel area) pehle; embed set cap 84."""
     import scan as scanmod
+    import time as _time
     from concurrent.futures import ThreadPoolExecutor as _TPE
     pool = [c for c in cands
             if not any(j in c["image_url"].lower() for j in _JUNK_URL)]
     ok: list = []
     idx = 0
+    t0 = _time.time()
     while idx < min(len(pool), max_try) and len(ok) < want_ok:
+        if idx and _time.time() - t0 > budget_s:
+            break
         wave = pool[idx: idx + 56]
         idx += len(wave)
         with _TPE(max_workers=16) as ex:
             ok.extend(d for d in ex.map(scanmod._download, wave) if d)
     ok.sort(key=lambda d: -(d["img"].width * d["img"].height))
-    return ok[:110]
+    return ok[:84]
 
 
 _SCAN_CACHE: dict = {}

@@ -3,108 +3,224 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SCAN — One Search, Overall Social Media Scan</title>
+<title>SCAN · Search on Search — Overall Image Scan</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; background: #101318; color: #e8ecf1; }
-  header { padding: 18px 16px 8px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  p.sub { margin: 0; color: #9aa7b5; font-size: 13px; }
-  form { display: flex; gap: 8px; padding: 14px 16px; }
-  input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #2a3342; background: #171c24; color: #fff; font-size: 16px; }
-  button { padding: 12px 18px; border: 0; border-radius: 10px; background: #22c55e; color: #06280f; font-weight: 700; font-size: 16px; }
-  #status { padding: 0 16px 10px; color: #fbbf24; font-size: 14px; min-height: 20px; }
-  #counts { padding: 0 16px 12px; color: #9aa7b5; font-size: 13px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 0 16px 24px; }
-  .card { background: #171c24; border: 1px solid #232c3a; border-radius: 12px; overflow: hidden; }
-  .card img { width: 100%; height: 130px; object-fit: cover; display: block; background: #0b0e13; }
-  .meta { padding: 8px; font-size: 12px; }
-  .score { color: #4ade80; font-weight: 700; }
-  .origin { display: inline-block; background: #1e293b; border-radius: 6px; padding: 1px 6px; margin-left: 4px; color: #93c5fd; }
-  .title { color: #cbd5e1; margin-top: 4px; line-height: 1.3; }
+  :root {
+    --bg: #0a0e14; --panel: rgba(255,255,255,.04); --line: rgba(255,255,255,.09);
+    --txt: #eef2f7; --mut: #94a3b8; --acc: #22c55e; --acc2: #2dd4bf;
+    --gold: #fbbf24; --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--txt);
+         font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  .hero { padding: 30px 18px 20px; text-align: center;
+          background: radial-gradient(700px 300px at 50% -60px, rgba(45,212,191,.22), transparent 65%),
+                      linear-gradient(180deg, #0d1522, var(--bg)); }
+  .logo { font-size: 30px; font-weight: 800; letter-spacing: .4px; }
+  .logo span { background: linear-gradient(90deg, var(--acc), var(--acc2));
+               -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tag { color: var(--mut); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 6px 14px 40px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+           padding: 16px; margin-top: 16px; backdrop-filter: blur(6px); }
+  .panel h2 { margin: 0 0 4px; font-size: 17px; }
+  .panel .hint { color: var(--mut); font-size: 12.5px; margin: 0 0 12px; line-height: 1.5; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text] { flex: 1 1 200px; padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line);
+                     background: #0d1420; color: var(--txt); font-size: 15.5px; outline: none; }
+  input[type=text]:focus { border-color: var(--acc2); }
+  input[type=file] { flex: 1 1 170px; padding: 10px; border-radius: 12px; border: 1px dashed rgba(255,255,255,.25);
+                     background: #0d1420; color: var(--mut); font-size: 13px; }
+  button { padding: 13px 20px; border: 0; border-radius: 12px; cursor: pointer;
+           background: linear-gradient(90deg, var(--acc), var(--acc2)); color: #04160b;
+           font-weight: 800; font-size: 15.5px; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .stage { display: none; margin-top: 14px; padding: 11px 13px; border-radius: 12px;
+           background: rgba(45,212,191,.08); border: 1px solid rgba(45,212,191,.25);
+           font-size: 13.5px; color: #a7f3ea; }
+  .stage.on { display: block; }
+  .pulse { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--acc2);
+           margin-right: 8px; animation: pl 1s infinite alternate; }
+  @keyframes pl { from { opacity: .3; } to { opacity: 1; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+          background: rgba(255,255,255,.05); color: var(--mut); }
+  .chip b { color: var(--txt); }
+  .chip.eng { border-color: rgba(251,191,36,.4); color: #fde68a; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { background: #0d1420; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+          transition: transform .15s, border-color .15s; }
+  .card:hover { transform: translateY(-2px); border-color: rgba(45,212,191,.45); }
+  .card img { width: 100%; height: 138px; object-fit: cover; display: block; background: #070b11; }
+  .meta { padding: 9px 10px 11px; }
+  .row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .score { font-weight: 800; font-size: 13.5px; padding: 2.5px 9px; border-radius: 999px; color: #04160b; }
+  .s-hi { background: #4ade80; } .s-md { background: #a3e635; }
+  .s-lo { background: #facc15; } .s-xl { background: #64748b; color: #e2e8f0; }
+  .org { font-size: 11px; padding: 2.5px 8px; border-radius: 999px; background: rgba(147,197,253,.14); color: #93c5fd; }
+  .via { font-size: 11px; padding: 2.5px 8px; border-radius: 999px; background: rgba(251,191,36,.13); color: #fcd34d; }
+  .ttl { font-size: 12.5px; color: #cbd5e1; margin-top: 7px; line-height: 1.35; min-height: 32px; }
+  .dom { font-size: 11px; color: #64748b; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .skel { height: 218px; border-radius: 14px; border: 1px solid var(--line);
+          background: linear-gradient(100deg, #0d1420 40%, #14202f 50%, #0d1420 60%);
+          background-size: 200% 100%; animation: sh 1.2s infinite; }
+  @keyframes sh { to { background-position: -200% 0; } }
+  #preview { display: none; margin-top: 10px; align-items: center; gap: 10px; }
+  #preview img { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+  .foot { text-align: center; color: #475569; font-size: 12px; margin-top: 26px; line-height: 1.6; }
   a { color: inherit; text-decoration: none; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🔎 SCAN — Ek Search, Overall Scan</h1>
-  <p class="sub">SEARCH ON SEARCH: engines se sirf websites/posts ke LINKS uthte hain — phir hamara engine har link ko KHUD visit karke images nikalta hai (YouTube + Commons + social OG bhi shamil). Ek waqt me overall scan, bina login.</p>
-</header>
-<form id="f">
-  <input id="q" placeholder="e.g. Pakistan logo on social media" value="Pakistan logo on social media">
-  <button>Scan</button>
-</form>
-<div id="status"></div>
-<div id="counts"></div>
-<div class="grid" id="grid"></div>
+<div class="hero">
+  <div class="logo">🔎 <span>SCAN</span> · Search on Search</div>
+  <p class="tag">Engines se sirf <b>links</b> — phir hamara engine har link ko khud visit karke images nikalta hai.<br>
+  Overall internet + social scan · bina login · apni matching (CLIP + tiles)</p>
+</div>
 
-<header style="padding-top:4px">
-  <h1>🖼️ IMAGE SCAN — Apni Image Do, Overall Dhoondo</h1>
-  <p class="sub">Apna logo/photo upload karo + topic likho — system overall sweep karke har mili image ko TUMHARI image se match karega (copy, edited, group ke andar — tiles deep-match ke saath). Ye hamara apna scan + match hai.</p>
-</header>
-<form id="f2">
-  <input type="file" id="file" accept="image/*" style="flex:1">
-  <input id="topic" placeholder="Topic e.g. Al Mudafioon" style="flex:1">
-  <button>Image Scan</button>
-</form>
-<div id="status2"></div>
-<div class="grid" id="grid2"></div>
+<div class="wrap">
+  <div class="panel">
+    <h2>🌐 Overall Scan</h2>
+    <p class="hint">Koi bhi topic likho — system search engines se website/post links uthayega, har link visit karke wahan ki sari images jama karega, aur phir unhein rank karega.</p>
+    <form id="f">
+      <input type="text" id="q" placeholder="e.g. Pakistan logo on social media" value="Pakistan logo on social media">
+      <input type="text" id="sites1" placeholder="Target websites (optional) e.g. brportal.org">
+      <button id="btn1">Scan Karo</button>
+    </form>
+    <div class="stage" id="stage1"></div>
+    <div class="chips" id="chips1"></div>
+    <div class="grid" id="grid1"></div>
+  </div>
+
+  <div class="panel">
+    <h2>🖼️ Image Scan — Apni Image Do, Overall Dhoondo</h2>
+    <p class="hint">Apna logo/photo upload karo + topic likho — overall sweep ki har image tumhari image se match hogi (copy, edited, group ke andar wali bhi — tiles deep-match ke saath).</p>
+    <form id="f2">
+      <input type="file" id="file" accept="image/*">
+      <input type="text" id="topic" placeholder="Topic e.g. Al Mudafioon">
+      <input type="text" id="sites2" placeholder="Target websites (optional) e.g. brportal.org">
+      <button id="btn2">Image Scan</button>
+    </form>
+    <div id="preview"><img id="pimg" alt=""><span style="color:var(--mut);font-size:12.5px">Tumhari reference image tayyar hai</span></div>
+    <div class="stage" id="stage2"></div>
+    <div class="chips" id="chips2"></div>
+    <div class="grid" id="grid2"></div>
+  </div>
+
+  <p class="foot">Apna engine: Search-on-Search discovery · khud visits · CLIP matching · spectrum 100% → 1%<br>
+  Jahan profile par login ki deewar aye, system LOGIN_REQUIRED batata hai.</p>
+</div>
+
 <script>
-const f = document.getElementById('f'), q = document.getElementById('q'),
-      status = document.getElementById('status'), counts = document.getElementById('counts'),
-      grid = document.getElementById('grid');
-f.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  status.textContent = 'Scan chal raha hai… (30-90 sec lag sakte hain)';
-  counts.textContent = ''; grid.innerHTML = '';
-  try {
-    const r = await fetch('/scan?q=' + encodeURIComponent(q.value));
-    const data = await r.json();
-    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
-    status.textContent = 'Scan mukammal ✅';
-    const c = data.counts || {};
-    counts.textContent = 'Harvest: ' + Object.entries(c).map(([k, v]) => k + ' ' + v).join(' · ') +
-      ' | kul ' + data.total + ' images check huin';
-    for (const item of data.results) {
-      const a = document.createElement('a');
-      a.href = item.source_url; a.target = '_blank';
-      a.innerHTML = '<div class="card"><img loading="lazy" src="' + item.thumb_url + '">' +
-        '<div class="meta"><span class="score">' + item.score + '%</span>' +
-        '<span class="origin">' + item.origin + '</span>' +
-        '<div class="title">' + (item.title || '').slice(0, 60) + '</div></div></div>';
-      grid.appendChild(a);
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dom = u => { try { return new URL(u).hostname.replace('www.', ''); } catch (e) { return ''; } };
+const sClass = v => v >= 70 ? 's-hi' : v >= 45 ? 's-md' : v >= 25 ? 's-lo' : 's-xl';
+
+function renderChips(el, job) {
+  let h = '';
+  if (job.links) {
+    for (const [eng, n] of Object.entries(job.links.per_engine || {}))
+      h += `<span class="chip eng">🔗 Link via <b>&nbsp;${esc(eng)}: ${n}</b></span>`;
+    h += `<span class="chip">Kul links: <b>&nbsp;${job.links.total}</b></span>`;
+  }
+  if (job.harvested)
+    for (const [org, n] of Object.entries(job.harvested))
+      h += `<span class="chip">${esc(org)}: <b>&nbsp;${n}</b></span>`;
+  el.innerHTML = h;
+}
+
+function renderResults(gridEl, data, matchWord) {
+  gridEl.innerHTML = '';
+  for (const item of data.results) {
+    const a = document.createElement('a');
+    a.href = item.source_url; a.target = '_blank'; a.rel = 'noopener';
+    a.innerHTML = `<div class="card"><img loading="lazy" src="${esc(item.thumb_url)}" alt="">
+      <div class="meta"><div class="row1">
+        <span class="score ${sClass(item.score)}">${item.score}%${matchWord ? ' match' : ''}</span>
+        <span class="org">${esc(item.origin)}</span>
+        ${item.via && item.via !== 'Direct' ? `<span class="via">via ${esc(item.via)}</span>` : ''}
+      </div>
+      <div class="ttl">${esc((item.title || '').slice(0, 64))}</div>
+      <div class="dom">${esc(dom(item.source_url))}</div></div></div>`;
+    gridEl.appendChild(a);
+  }
+}
+
+async function pollJob(jobId, stageEl, chipsEl, gridEl, btn, matchWord) {
+  stageEl.classList.add('on');
+  gridEl.innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+  const t0 = Date.now();
+  while (true) {
+    await new Promise(r => setTimeout(r, 4000));
+    let job;
+    try {
+      const r = await fetch('/job/' + jobId);
+      job = await r.json();
+    } catch (e) {
+      stageEl.innerHTML = '<span class="pulse"></span>Status check me rukawat — dobara try kar raha hoon…';
+      continue;
     }
-  } catch (err) { status.textContent = 'Network error: ' + err; }
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (job.state === 'running') {
+      stageEl.innerHTML = `<span class="pulse"></span>${esc(job.stage || 'chal raha hai…')} <span style="color:#64748b">(${secs}s)</span>`;
+      renderChips(chipsEl, job);
+    } else if (job.state === 'done') {
+      const d = job.result;
+      stageEl.innerHTML = `✅ Mukammal — <b>${d.total}</b> images check huin, top ${d.results.length} results neeche hain <span style="color:#64748b">(${secs}s)</span>`;
+      renderChips(chipsEl, { links: job.links, harvested: d.counts });
+      renderResults(gridEl, d, matchWord);
+      break;
+    } else {
+      stageEl.innerHTML = '❌ Error: ' + esc(job.error || 'kuch ghalat ho gaya');
+      gridEl.innerHTML = '';
+      break;
+    }
+  }
+  btn.disabled = false;
+}
+
+async function startJob(url, opts, els, matchWord) {
+  const { stageEl, chipsEl, gridEl, btn } = els;
+  btn.disabled = true;
+  chipsEl.innerHTML = ''; gridEl.innerHTML = '';
+  stageEl.classList.add('on');
+  stageEl.innerHTML = '<span class="pulse"></span>Scan shuru ho raha hai…';
+  try {
+    const r = await fetch(url, opts);
+    const data = await r.json();
+    if (data.error) { stageEl.innerHTML = '❌ ' + esc(data.error); btn.disabled = false; return; }
+    await pollJob(data.job_id, stageEl, chipsEl, gridEl, btn, matchWord);
+  } catch (e) {
+    stageEl.innerHTML = '❌ Network error — page refresh karke dobara try karo';
+    btn.disabled = false;
+  }
+}
+
+$('f').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  const sites = $('sites1').value.trim();
+  startJob('/scan/start?q=' + encodeURIComponent(q) + (sites ? '&sites=' + encodeURIComponent(sites) : ''), undefined,
+    { stageEl: $('stage1'), chipsEl: $('chips1'), gridEl: $('grid1'), btn: $('btn1') }, false);
 });
 
-const f2 = document.getElementById('f2'), fileEl = document.getElementById('file'),
-      topicEl = document.getElementById('topic'),
-      status2 = document.getElementById('status2'), grid2 = document.getElementById('grid2');
-f2.addEventListener('submit', async (e) => {
+$('file').addEventListener('change', () => {
+  const f = $('file').files[0];
+  if (f) { $('pimg').src = URL.createObjectURL(f); $('preview').style.display = 'flex'; }
+});
+
+$('f2').addEventListener('submit', e => {
   e.preventDefault();
-  if (!fileEl.files.length) { status2.textContent = 'Pehle image choose karo'; return; }
-  if (!topicEl.value.trim()) { status2.textContent = 'Topic likho (kis naam par scan karun)'; return; }
-  status2.textContent = 'Image scan chal raha hai… overall sweep + matching (30-90 sec)';
-  grid2.innerHTML = '';
+  const file = $('file').files[0], topic = $('topic').value.trim();
+  if (!file) { $('stage2').classList.add('on'); $('stage2').textContent = 'Pehle image choose karo'; return; }
+  if (!topic) { $('stage2').classList.add('on'); $('stage2').textContent = 'Topic likho (kis naam par scan karun)'; return; }
   const fd = new FormData();
-  fd.append('file', fileEl.files[0]);
-  try {
-    const r = await fetch('/imagescan?q=' + encodeURIComponent(topicEl.value), { method: 'POST', body: fd });
-    const data = await r.json();
-    if (data.error) { status2.textContent = 'Error: ' + data.error; return; }
-    const c = data.counts || {};
-    status2.textContent = 'Image scan mukammal ✅ | Harvest: ' +
-      Object.entries(c).map(([k, v]) => k + ' ' + v).join(' · ') +
-      ' | ' + data.total + ' images tumhari image se match huin (sab se zyada match upar)';
-    for (const item of data.results) {
-      const a = document.createElement('a');
-      a.href = item.source_url; a.target = '_blank';
-      a.innerHTML = '<div class="card"><img loading="lazy" src="' + item.thumb_url + '">' +
-        '<div class="meta"><span class="score">' + item.score + '% match</span>' +
-        '<span class="origin">' + item.origin + '</span>' +
-        '<div class="title">' + (item.title || '').slice(0, 60) + '</div></div></div>';
-      grid2.appendChild(a);
-    }
-  } catch (err) { status2.textContent = 'Network error: ' + err; }
+  fd.append('file', file);
+  const sites = $('sites2').value.trim();
+  startJob('/imagescan/start?q=' + encodeURIComponent(topic) + (sites ? '&sites=' + encodeURIComponent(sites) : ''), { method: 'POST', body: fd },
+    { stageEl: $('stage2'), chipsEl: $('chips2'), gridEl: $('grid2'), btn: $('btn2') }, true);
 });
 </script>
 </body>

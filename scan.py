@@ -192,68 +192,87 @@ def ddg_links(session: requests.Session, query: str,
 
 
 def discover_links(session: requests.Session, query: str,
-                   per_engine: int = 10) -> list[str]:
+                   per_engine: int = 12) -> list[dict]:
     """SEARCH ON SEARCH: engines se sirf LINKS uthao (query + facebook
     + instagram variants taake posts bhi ayen). Images engine ki kabhi
-    nahi — har link ko hamara engine khud visit karega."""
-    links: list[str] = []
+    nahi — har link ko hamara engine khud visit karega. Har link ke
+    saath ye bhi record hota hai ke kis ENGINE ne wo link diya (UI me
+    dikhaya jata hai)."""
+    links: list[dict] = []
     seen: set[str] = set()
+    per: dict[str, int] = {}
     for q in (query, f"{query} facebook", f"{query} instagram"):
-        for fn in (ddg_links, bing_links):
+        for name, fn in (("DuckDuckGo", ddg_links), ("Bing", bing_links)):
             for u in fn(session, q, per_engine):
                 key = u.split("#")[0]
                 if key not in seen and "duckduckgo.com" not in key:
                     seen.add(key)
-                    links.append(u)
-    print(f"  [search-on-search] {len(links)} links mile "
+                    links.append({"url": u, "engine": name})
+                    per[name] = per.get(name, 0) + 1
+    print(f"  [search-on-search] {len(links)} links mile {per} "
           f"(sirf links — images hamara engine nikale ga)")
-    return links[:36]
+    return links[:48]
 
 
-def visit_links(session: requests.Session, links: list[str],
-                per_page: int = 20, max_pages: int = 24) -> list[dict]:
+def visit_links(session: requests.Session, links: list,
+                per_page: int = 40, max_pages: int = 30) -> list[dict]:
     """Har link ko hamara engine KHUD visit karta hai: aam websites se
-    page ki images, social posts/pages se OG adapters ke zariye."""
-    import time as _time
-    out: list[dict] = []
-    for u in links[:max_pages]:
-        _time.sleep(0.4)
+    page ki SARI images (ek link = kai images), social posts/pages se
+    OG adapters ke zariye. Visits parallel hain (6 workers) taake
+    overall scan tez ho. Har item par 'via' = wo engine jis ne link
+    diya tha."""
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+
+    def one(link) -> list[dict]:
+        if isinstance(link, dict):
+            u, via = link["url"], link.get("engine", "")
+        else:
+            u, via = link, ""
+
+        def tag(items: list[dict]) -> list[dict]:
+            return [dict(it, via=via) for it in items]
+
         if "facebook.com" in u or "instagram.com" in u:
             kind = "facebook" if "facebook.com" in u else "instagram"
             got = social.ADAPTERS[kind](u)
             if not got:
                 print(f"  [LOGIN_REQUIRED] {u[:80]} — public data nahi "
                       f"mila; gehra analysis login se hoga")
-            for item in got:
-                out.append(dict(item, origin=kind))
-            continue
+            return tag([dict(item, origin=kind) for item in got])
         if "youtube.com/watch" in u:
             m = re.search(r"v=([\w-]{11})", u)
             if m:
-                out.append({
+                return tag([{
                     "image_url": f"https://i.ytimg.com/vi/{m.group(1)}"
                                  f"/hqdefault.jpg",
                     "source_url": u, "title": "YouTube video",
-                    "origin": "youtube"})
-            continue
+                    "origin": "youtube"}])
+            return []
         if "youtube.com/" in u:
-            for item in social.youtube_images(u):
-                out.append(dict(item, origin="youtube"))
-            continue
-        got = _fetch_soup(session, u)
+            return tag([dict(item, origin="youtube")
+                        for item in social.youtube_images(u)])
+        local = requests.Session()
+        local.headers.update(HEADERS)
+        got = _fetch_soup(local, u)
         if got is None:
-            continue
+            return []
         soup, title = got
-        for img_url in crawl.candidate_image_urls(soup, u)[:per_page]:
-            out.append({"image_url": img_url, "source_url": u,
-                        "title": title, "origin": "web"})
-    return out
+        return tag([{"image_url": img_url, "source_url": u,
+                     "title": title, "origin": "web"}
+                    for img_url in
+                    crawl.candidate_image_urls(soup, u)[:per_page]])
+
+    with _TPE(max_workers=6) as ex:
+        parts = list(ex.map(one, links[:max_pages]))
+    return [item for part in parts for item in part]
 
 
-def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
+def harvest(query: str, sites: list[str] | None = None,
+            on_event=None) -> list[dict]:
     """Overall sweep — SEARCH ON SEARCH upar, baqi sources neeche:
     engine links -> hamara visit; YouTube adapter; Commons library;
-    --sites par apna crawler."""
+    --sites par apna crawler. on_event(kind, data) progress ke liye:
+    ("links", {total, per_engine}) aur ("harvested", {origin: n})."""
     session = requests.Session()
     session.headers.update(HEADERS)
     found: dict[str, dict] = {}
@@ -263,15 +282,24 @@ def harvest(query: str, sites: list[str] | None = None) -> list[dict]:
             found.setdefault(item["image_url"], item)
 
     links = discover_links(session, query)
+    if on_event:
+        from collections import Counter
+        on_event("links", {
+            "total": len(links),
+            "per_engine": dict(Counter(l["engine"] for l in links))})
     for item in visit_links(session, links):
         add(item)
     for item in youtube_search(session, query):
-        add(item)
+        add(dict(item, via="Direct"))
     for item in commons_search(session, query):
-        add(item)
+        add(dict(item, via="Direct"))
     if sites:
         for item in crawl_topic(session, query, sites):
-            add(item)
+            add(dict(item, via="Direct"))
+    if on_event:
+        from collections import Counter
+        on_event("harvested", dict(Counter(
+            i["origin"] for i in found.values())))
     return list(found.values())
 
 

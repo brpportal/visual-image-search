@@ -6,4 +6,10 @@ data/images/*
 data/thumbs/*
 !data/images/.gitkeep
 !data/thumbs/.gitkeep
+# demo/ (chat proof grids, local only)
+
+# runtime data (local only)
+data/
+references/
+references-islamic/
 demo/

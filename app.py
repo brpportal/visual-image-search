@@ -171,30 +171,16 @@ def thumb(image_id: int) -> FileResponse:
     return FileResponse(thumb_path, media_type="image/jpeg")
 
 
-@app.get("/scan")
-def scan(q: str, limit: int = 60):
-    """SCAN mode (scan.py): ONE query -> overall sweep of web + YouTube
-    + public Facebook/Instagram via OG adapters, ranked by our CLIP."""
-    import scan as scanmod
-    from concurrent.futures import ThreadPoolExecutor as _TPE
-    q = (q or "").strip()
-    if not q:
-        return {"error": "empty query"}
-    try:
-        cands = scanmod.harvest(q)
-    except Exception as exc:
-        return {"error": f"harvest failed: {type(exc).__name__}"}
-    from collections import Counter
-    counts = dict(Counter(c["origin"] for c in cands))
-    cands = cands[: max(10, min(limit, 120))]
-    with _TPE(max_workers=8) as ex:
-        ok = [d for d in ex.map(scanmod._download, cands) if d]
-    if not ok:
-        return {"query": q, "counts": counts, "total": 0, "results": []}
-    vecs = core.embed_pil_images([d["img"] for d in ok])
-    _q = core.embed_text(q)
-    qv = _q[0] if _q.ndim == 2 else _q
-    scores = (vecs @ qv).tolist()
+TOP_RESULTS = 48
+
+
+def _result_item(d: dict, score: float) -> dict:
+    return {"score": round(score * 100, 1), "origin": d["origin"],
+            "via": d.get("via", ""), "thumb_url": d["image_url"],
+            "source_url": d["source_url"], "title": d["title"]}
+
+
+def _top_kept(ok, vecs, scores, topn=TOP_RESULTS):
     order = sorted(range(len(ok)), key=lambda i: -scores[i])
     kept, kept_idx = [], []
     for i in order:
@@ -202,44 +188,62 @@ def scan(q: str, limit: int = 60):
             continue
         kept.append(i)
         kept_idx.append(i)
-        if len(kept) >= 24:
+        if len(kept) >= topn:
             break
+    return kept
+
+
+def _scan_compute(q: str, limit: int = 200, on_event=None,
+                  sites: list | None = None) -> dict:
+    """SCAN (Search on Search): engines se sirf links, hamara engine
+    visit karke images nikalta hai, CLIP se query ke khilaf ranking.
+    sites = user ki di hui target websites — engine unhein lazmi
+    visit karta hai (engines ki marzi par depend nahi)."""
+    import scan as scanmod
+    from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    q = (q or "").strip()
+    if not q:
+        return {"error": "empty query"}
+    try:
+        cands = scanmod.harvest(q, sites=sites, on_event=on_event)
+    except Exception as exc:
+        return {"error": f"harvest failed: {type(exc).__name__}"}
+    counts = dict(Counter(c["origin"] for c in cands))
+    cands = cands[: max(10, min(limit, 240))]
+    with _TPE(max_workers=12) as ex:
+        ok = [d for d in ex.map(scanmod._download, cands) if d]
+    if not ok:
+        return {"query": q, "counts": counts, "total": 0, "results": []}
+    vecs = core.embed_pil_images([d["img"] for d in ok])
+    _q = core.embed_text(q)
+    qv = _q[0] if _q.ndim == 2 else _q
+    scores = (vecs @ qv).tolist()
+    kept = _top_kept(ok, vecs, scores)
     return {"query": q, "counts": counts, "total": len(ok),
-            "results": [{"score": round(scores[i] * 100, 1),
-                         "origin": ok[i]["origin"],
-                         "thumb_url": ok[i]["image_url"],
-                         "source_url": ok[i]["source_url"],
-                         "title": ok[i]["title"]} for i in kept]}
+            "results": [_result_item(ok[i], scores[i]) for i in kept]}
 
 
-@app.post("/imagescan")
-async def imagescan(file: UploadFile = File(...), q: str = "",
-                    limit: int = 60):
-    """IMAGE SCAN — the hunter flow as a web test: upload a reference
-    image (e.g. your logo) + a topic; the system sweeps the web +
-    YouTube + public social (OG) for candidates, then matches EVERY
-    candidate against YOUR image with our own CLIP + tile deep-match
-    (edited / group-image forms included), full spectrum, no hiding."""
+def _imagescan_compute(ref, query: str, limit: int = 180,
+                       on_event=None, sites: list | None = None) -> dict:
+    """IMAGE SCAN: upload ki hui image ko reference bana kar overall
+    sweep ki har image se hamari CLIP + tile deep-match. sites = user
+    ki target websites jinhein engine lazmi visit karega."""
     import scan as scanmod
     import hunter as huntermod
+    from collections import Counter
     from concurrent.futures import ThreadPoolExecutor as _TPE
-    raw = await file.read()
-    try:
-        ref = Image.open(io.BytesIO(raw)).convert("RGB")
-    except Exception:
-        return {"error": "uploaded image unreadable"}
-    query = (q or "").strip()
+    query = (query or "").strip()
     if not query:
         return {"error": "topic (q) required — kis naam/topic par "
                          "overall scan karun?"}
     try:
-        cands = scanmod.harvest(query)
+        cands = scanmod.harvest(query, sites=sites, on_event=on_event)
     except Exception as exc:
         return {"error": f"harvest failed: {type(exc).__name__}"}
-    from collections import Counter
     counts = dict(Counter(c["origin"] for c in cands))
-    cands = cands[: max(10, min(limit, 120))]
-    with _TPE(max_workers=8) as ex:
+    cands = cands[: max(10, min(limit, 240))]
+    with _TPE(max_workers=12) as ex:
         ok = [d for d in ex.map(scanmod._download, cands) if d]
     if not ok:
         return {"query": query, "counts": counts, "total": 0,
@@ -258,21 +262,115 @@ async def imagescan(file: UploadFile = File(...), q: str = "",
         for j, i in enumerate(owners):
             if vs[j] > scores[i]:
                 scores[i] = vs[j]
-    order = sorted(range(len(ok)), key=lambda i: -scores[i])
-    kept, kept_idx = [], []
-    for i in order:
-        if kept_idx and float((vecs[kept_idx] @ vecs[i]).max()) > 0.98:
-            continue
-        kept.append(i)
-        kept_idx.append(i)
-        if len(kept) >= 24:
-            break
+    kept = _top_kept(ok, vecs, scores)
     return {"query": query, "counts": counts, "total": len(ok),
-            "results": [{"score": round(scores[i] * 100, 1),
-                         "origin": ok[i]["origin"],
-                         "thumb_url": ok[i]["image_url"],
-                         "source_url": ok[i]["source_url"],
-                         "title": ok[i]["title"]} for i in kept]}
+            "results": [_result_item(ok[i], scores[i]) for i in kept]}
+
+
+def _parse_sites(sites: str | None) -> list | None:
+    if not sites:
+        return None
+    out = []
+    for s in sites.replace(",", " ").split():
+        s = s.strip()
+        if s:
+            out.append(s if s.startswith("http") else "https://" + s)
+    return out or None
+
+
+@app.get("/scan")
+def scan(q: str, limit: int = 200, sites: str = ""):
+    return _scan_compute(q, limit, sites=_parse_sites(sites))
+
+
+@app.post("/imagescan")
+async def imagescan(file: UploadFile = File(...), q: str = "",
+                    limit: int = 180, sites: str = ""):
+    raw = await file.read()
+    try:
+        ref = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        return {"error": "uploaded image unreadable"}
+    return _imagescan_compute(ref, q, limit, sites=_parse_sites(sites))
+
+
+# ---- JOB pattern: pehle jawab (job id), phir peeche kaam ----------
+# Lambi ek-request wali scans mobile/tunnel par toot jati theen; ab
+# page chhoti requests se progress poochta rehta hai (polling).
+import threading
+import time
+import uuid
+
+JOBS: dict = {}
+
+
+def _start_job(fn) -> str:
+    job_id = uuid.uuid4().hex[:10]
+    job = {"state": "running", "stage": "shuru ho raha hai…",
+           "result": None, "error": None, "ts": time.time(),
+           "links": None, "harvested": None}
+    JOBS[job_id] = job
+
+    def on_event(kind, data):
+        if kind == "links":
+            job["links"] = data
+            job["stage"] = (f"{data['total']} links mile — pages "
+                            f"visit ho rahi hain…")
+        elif kind == "harvested":
+            job["harvested"] = data
+            job["stage"] = "images mil gayi — matching chal rahi hai…"
+
+    def run():
+        try:
+            res = fn(on_event)
+            if isinstance(res, dict) and res.get("error"):
+                job["state"] = "error"
+                job["error"] = res["error"]
+            else:
+                job["result"] = res
+                job["state"] = "done"
+        except Exception as exc:
+            job["state"] = "error"
+            job["error"] = f"{type(exc).__name__}: {exc}"
+
+    threading.Thread(target=run, daemon=True).start()
+    return job_id
+
+
+@app.get("/scan/start")
+def scan_start(q: str, limit: int = 200, sites: str = ""):
+    parsed = _parse_sites(sites)
+    return {"job_id": _start_job(
+        lambda ev: _scan_compute(q, limit, ev, sites=parsed))}
+
+
+@app.post("/imagescan/start")
+async def imagescan_start(file: UploadFile = File(...), q: str = "",
+                          limit: int = 180, sites: str = ""):
+    raw = await file.read()
+    try:
+        ref = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        return {"error": "uploaded image unreadable"}
+    parsed = _parse_sites(sites)
+    return {"job_id": _start_job(
+        lambda ev: _imagescan_compute(ref, q, limit, ev,
+                                      sites=parsed))}
+
+
+@app.get("/job/{job_id}")
+def job_status(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        return {"state": "error",
+                "error": "job not found (server restart ho gaya?)"}
+    out = {"state": job["state"], "stage": job["stage"],
+           "links": job["links"], "harvested": job["harvested"]}
+    if job["state"] == "done":
+        out["result"] = job["result"]
+    if job["state"] == "error":
+        out["error"] = job["error"]
+    return out
 
 
 app.mount("/images", StaticFiles(directory=core.IMAGES_DIR), name="images")

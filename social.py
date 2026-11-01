@@ -30,16 +30,26 @@ import webfetch
 
 MAX_PER_SOURCE = 60
 
+# Social platforms serve OpenGraph data (og:image / og:title — the link
+# preview mechanism) to CRAWLER user agents without any login, while a
+# browser UA gets a login wall. Verified live 2026-11-01: Facebook page
+# + posts and Instagram profiles return OG + content images to the
+# Googlebot UA. So adapters ask as a crawler first, browser second.
+CRAWLER_UA = ("Mozilla/5.0 (compatible; Googlebot/2.1; "
+              "+http://www.google.com/bot.html)")
+CRAWLER_HEADERS = {"User-Agent": CRAWLER_UA,
+                   "Accept-Language": "en-US,en;q=0.9"}
 
-def _session() -> requests.Session:
+
+def _session(headers: dict | None = None) -> requests.Session:
     s = requests.Session()
-    s.headers.update(webfetch.HEADERS)
+    s.headers.update(headers or webfetch.HEADERS)
     return s
 
 
-def _fetch(url: str) -> str | None:
+def _fetch(url: str, headers: dict | None = None) -> str | None:
     try:
-        r = _session().get(url, timeout=25)
+        r = _session(headers).get(url, timeout=25)
         return r.text
     except Exception as exc:
         print(f"  [social:error] {url[:70]}: {type(exc).__name__} "
@@ -92,7 +102,9 @@ def youtube_images(url: str) -> list[dict]:
 
 
 def instagram_images(url: str) -> list[dict]:
-    html = _fetch(url)
+    # Crawler UA first: profiles serve OG + scontent photos to crawlers
+    # (link previews) while browsers get a login wall.
+    html = _fetch(url, CRAWLER_HEADERS)
     if html is None:
         return []
     doc = html.replace("\\u0026", "&").replace("\\/", "/")
@@ -119,13 +131,17 @@ def instagram_images(url: str) -> list[dict]:
 
 
 def facebook_images(url: str) -> list[dict]:
-    html = _fetch(url)
+    # Crawler UA first: pages AND posts serve og:image/og:title (the
+    # lookaside crawler media) without login; a browser UA gets a wall.
+    html = _fetch(url, CRAWLER_HEADERS)
     if html is None:
         return []
     doc = html.replace("\\u0026", "&").replace("\\/", "/")
     urls = list(dict.fromkeys(re.findall(
         r'https://scontent[^"\' ]*?fbcdn\.net[^"\' ]*?\.(?:jpg|jpeg|png)'
         r'(?:\?[^"\' ]*)?', doc)))
+    urls += [u for u in dict.fromkeys(re.findall(
+        r'https://lookaside\.fbsbx\.com/[^"\' ]+', doc)) if u not in urls]
     out = []
     og = _og(html, "image")
     title = _og(html, "title") or "Facebook"

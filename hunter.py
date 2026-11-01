@@ -43,6 +43,25 @@ from crawl import (MIN_SIZE, USER_AGENT, candidate_image_urls,
 BATCH = 16
 
 
+def views_of(img) -> list:
+    """Extra views for deep matching: a logo can hide inside a bigger
+    picture (collage/group image), where the whole-image embedding
+    dilutes it. Center crop + 4 overlapping quadrants let a small logo
+    fill the frame in at least one view."""
+    w, h = img.size
+    views = []
+    cw, ch = int(w * 0.7), int(h * 0.7)
+    x0, y0 = (w - cw) // 2, (h - ch) // 2
+    views.append(img.crop((x0, y0, x0 + cw, y0 + ch)))
+    hw, hh = w // 2, h // 2
+    ox, oy = int(w * 0.08), int(h * 0.08)
+    views.append(img.crop((0, 0, hw + ox, hh + oy)))
+    views.append(img.crop((hw - ox, 0, w, hh + oy)))
+    views.append(img.crop((0, hh - oy, hw + ox, h)))
+    views.append(img.crop((hw - ox, hh - oy, w, h)))
+    return views
+
+
 def page_links(soup: BeautifulSoup, page_url: str) -> list[str]:
     host = urlparse(page_url).netloc
     out, seen = [], set()
@@ -68,8 +87,16 @@ def hunt(args) -> dict:
     if ref_index is None or ref_index.ntotal == 0:
         raise SystemExit("Reference index is empty — first run: "
                          "python reference.py build")
+    tag_ids: set[int] | None = None
+    if args.tag:
+        tag_ids = {int(r[0]) for r in conn.execute(
+            "SELECT id FROM ref_images WHERE tag = ?", (args.tag,))}
+        if not tag_ids:
+            raise SystemExit(f"No references with tag {args.tag!r} — "
+                             f"build them first (reference.py --tag)")
+        print(f"Target set {args.tag!r}: {len(tag_ids)} references")
     print(f"Reference index: {ref_index.ntotal} images | "
-          f"threshold: {args.threshold:.2f}")
+          f"threshold: {args.threshold:.2f} | tiles: {args.tiles}")
 
     scanned_urls = {r["found_url"] for r in conn.execute(
         "SELECT found_url FROM scanned")}
@@ -95,13 +122,42 @@ def hunt(args) -> dict:
     visited: set[str] = set()
     pending: list[dict] = []
 
+    def best_in_tag(scores_row, ids_row):
+        """Best (score, ref_id) in one search row, honoring --tag."""
+        if tag_ids is None:
+            return float(scores_row[0]), int(ids_row[0])
+        for s, i in zip(scores_row, ids_row):
+            if int(i) in tag_ids:
+                return float(s), int(i)
+        return -1.0, -1
+
     def flush() -> None:
         if not pending:
             return
+        topk = 8 if tag_ids is not None else 1
         vectors = core.embed_pil_images([p["img"] for p in pending])
-        scores, ids = ref_index.search(vectors, 1)
-        for item, score, ref_id in zip(pending, scores[:, 0], ids[:, 0]):
-            score = float(score)
+        scores, ids = ref_index.search(vectors, topk)
+        best = [best_in_tag(scores[i], ids[i]) for i in range(len(pending))]
+        # Stage 2 — deep match: tile views rescue a logo diluted inside
+        # a bigger picture (group/collage images). Only run for items
+        # not already matched globally but plausibly related (>= 0.25),
+        # which keeps automated hunts fast.
+        if args.tiles:
+            todo = [i for i, (s, _) in enumerate(best)
+                    if 0.25 <= s < args.threshold]
+            if todo:
+                views, owners = [], []
+                for i in todo:
+                    for v in views_of(pending[i]["img"]):
+                        views.append(v)
+                        owners.append(i)
+                vvecs = core.embed_pil_images(views)
+                vscores, vids = ref_index.search(vvecs, topk)
+                for j, i in enumerate(owners):
+                    s2, r2 = best_in_tag(vscores[j], vids[j])
+                    if s2 > best[i][0]:
+                        best[i] = (s2, r2)
+        for item, (score, ref_id) in zip(pending, best):
             conn.execute(
                 "INSERT OR REPLACE INTO scanned (found_url, phash,"
                 " best_score, best_ref_id, scanned_at) VALUES (?,?,?,?,?)",
@@ -242,6 +298,13 @@ def main() -> None:
                     help="max candidate images per page")
     ap.add_argument("--threshold", type=float, default=0.80,
                     help="min cosine similarity to call it a match")
+    ap.add_argument("--tag", default="",
+                    help="only match references built with this tag "
+                         "(e.g. islamic); empty = whole reference set")
+    ap.add_argument("--tiles", action="store_true",
+                    help="deep match: also compare center/quadrant "
+                         "crops, rescuing logos inside group/collage "
+                         "images")
     ap.add_argument("--delay", type=float, default=1.2)
     ap.add_argument("--watch", type=int, default=0,
                     help="repeat every N minutes (0 = run once)")

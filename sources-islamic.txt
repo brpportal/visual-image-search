@@ -1,0 +1,7 @@
+# Islamic-logo hunt seeds — org/charity/knowledge sites whose pages
+# carry logos, banners and collage/group images.
+https://commons.wikimedia.org/wiki/Category:Islamic_logos
+https://www.islamic-relief.org
+https://muslimhands.org.uk
+https://yaqeeninstitute.org
+https://www.dawateislami.net

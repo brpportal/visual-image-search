@@ -36,7 +36,11 @@ def ensure_tables(conn) -> None:
         "CREATE TABLE IF NOT EXISTS ref_images ("
         " id INTEGER PRIMARY KEY, file_path TEXT, phash TEXT DEFAULT '',"
         " width INTEGER DEFAULT 0, height INTEGER DEFAULT 0,"
-        " created_at REAL DEFAULT 0)")
+        " created_at REAL DEFAULT 0, tag TEXT DEFAULT '')")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ref_images)")}
+    if "tag" not in cols:  # migrate databases created before tags existed
+        conn.execute(
+            "ALTER TABLE ref_images ADD COLUMN tag TEXT DEFAULT ''")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS matches ("
         " id INTEGER PRIMARY KEY, found_url TEXT UNIQUE,"
@@ -69,7 +73,7 @@ def save_ref_index(index) -> None:
     faiss.write_index(index, REF_INDEX_PATH)
 
 
-def build(folder: str, batch_size: int = 16) -> None:
+def build(folder: str, batch_size: int = 16, tag: str = "") -> None:
     core.init_db()
     conn = core.connect()
     ensure_tables(conn)
@@ -129,8 +133,8 @@ def build(folder: str, batch_size: int = 16) -> None:
             continue
         cur = conn.execute(
             "INSERT INTO ref_images (file_path, phash, width, height,"
-            " created_at) VALUES (?,?,?,?,?)",
-            (rel_path, ph, img.width, img.height, time.time()))
+            " created_at, tag) VALUES (?,?,?,?,?,?)",
+            (rel_path, ph, img.width, img.height, time.time(), tag))
         known_hashes.append(ph)
         known_paths.add(rel_path)
         pending.append((int(cur.lastrowid), img))
@@ -145,6 +149,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Build the reference index")
     ap.add_argument("command", choices=["build"])
     ap.add_argument("--folder", default="references")
+    ap.add_argument("--tag", default="",
+                    help="label stored with every reference from this "
+                         "folder (e.g. islamic) so hunts can target one set")
     args = ap.parse_args()
     if args.command == "build":
-        build(args.folder)
+        build(args.folder, tag=args.tag)

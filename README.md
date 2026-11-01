@@ -92,6 +92,29 @@ results, like Google Images. First search for a query takes ~20–35 s
 - The **My Index** tab in the UI is the original offline mode over your
   own crawled/indexed images (`/search`).
 
+## Reference hunter — our own system (no one else's backend)
+
+This is the Google/Bing/Pinterest *technology* rebuilt as our own
+system: give it reference images, and it scans the web itself to find
+those images and ones like them.
+
+1. **Reference set:** drop images into `references/` (thousands are
+   fine) and build the reference index:
+   `python reference.py build`
+2. **Seeds:** list starting pages in `sources.txt`. The hunter crawls
+   them politely (robots.txt, delays, login pages skipped) and follows
+   same-host links. Social sources work without login via adapters —
+   prefix a line: `youtube: https://…`, `instagram: …`, `facebook: …`
+   (YouTube thumbnails are fully public; Instagram/Facebook expose only
+   what they serve to logged-out visitors — walls are reported, never
+   bypassed).
+3. **Hunt:** `python hunter.py --threshold 0.80` — every image found is
+   embedded with CLIP and compared to the reference index; matches are
+   saved to `data/found/` and recorded in SQLite with score + the
+   reference matched + source page. Scanned URLs are remembered, so
+   repeat runs only check NEW images.
+4. **Automate:** `--watch 60` repeats hourly, or run it from cron.
+
 ## Quick self-test (20 sample images)
 
 ```bash

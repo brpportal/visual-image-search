@@ -1,0 +1,8 @@
+# Hunter seed pages — one public page URL per line.
+# The hunter crawls these, follows same-host links (--depth),
+# and reports images matching the reference set.
+# Social sources (no login, public data only):
+#   youtube: https://www.youtube.com/@channel/videos
+#   instagram: https://www.instagram.com/p/POSTCODE/
+#   facebook: https://www.facebook.com/PublicPage
+https://dinoanimals.com/animals/domestic-cat/

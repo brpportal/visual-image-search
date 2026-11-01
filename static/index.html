@@ -48,7 +48,7 @@
 <body>
 <header>
   <h1>🔎 Visual Image Search</h1>
-  <div class="sub" id="modeSub">Index mode: search your own indexed images — by picture or by words. Overall web/social scan ke liye 🔎 SCAN — Apna System dabao (hamara apna crawler + matching, koi Bing/Pinterest engine nahi).</div>
+  <div class="sub" id="modeSub">Index mode: search your own indexed images — by picture or by words. Overall web/social scan ke liye 🔎 SCAN — Apna System dabao (hamara apna crawler + matching, kisi doosray ka image engine nahi).</div>
 </header>
 
 <div class="controls">
@@ -113,12 +113,6 @@ function render(results) {
     link.textContent = 'Open source ↗';
     meta.appendChild(title);
     meta.appendChild(link);
-    if (r.engine) {
-      const chip = document.createElement('span');
-      chip.className = 'engine';
-      chip.textContent = r.engine === 'bing' ? 'via Bing' : 'via Pinterest';
-      meta.appendChild(chip);
-    }
     card.appendChild(img);
     card.appendChild(badge);
     card.appendChild(meta);

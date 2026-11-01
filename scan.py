@@ -115,16 +115,19 @@ def _fetch_soup(session: requests.Session, url: str):
 
 
 def crawl_topic(session: requests.Session, query: str,
-                sites: list[str], max_pages: int = 8,
-                per_page: int = 20) -> list[dict]:
-    """Our own crawler over seed sites: harvest page images, follow
-    same-site links whose URL carries a topic word (1 level deep)."""
+                sites: list[str], max_pages: int = 10,
+                per_page: int = 40, seed_per_page: int = 80) -> list[dict]:
+    """Our own crawler over seed sites: jo page user ne diya hai wo
+    INDEX page hai — us ki SARI images (photos + video posters +
+    embedded-video thumbnails) harvest hoti hain; phir same-site
+    links jin ke URL me topic word ho (1 level deep) bhi visit hote
+    hain."""
     words = [w for w in re.findall(r"[a-z0-9]+", query.lower())
              if len(w) >= 4]
     out: list[dict] = []
     seen_pages: set[str] = set()
 
-    def visit(url: str, depth: int) -> None:
+    def visit(url: str, depth: int, cap: int) -> None:
         if url in seen_pages or len(seen_pages) >= max_pages:
             return
         seen_pages.add(url)
@@ -132,16 +135,16 @@ def crawl_topic(session: requests.Session, query: str,
         if got is None:
             return
         soup, title = got
-        for img_url in crawl.candidate_image_urls(soup, url)[:per_page]:
+        for img_url in crawl.candidate_image_urls(soup, url)[:cap]:
             out.append({"image_url": img_url, "source_url": url,
                         "title": title, "origin": "web"})
         if depth > 0:
             for link in huntermod.page_links(soup, url):
                 if any(w in link.lower() for w in words):
-                    visit(link, depth - 1)
+                    visit(link, depth - 1, per_page)
 
     for s in sites:
-        visit(s, 1)
+        visit(s, 1, seed_per_page)
     return out
 
 
@@ -191,27 +194,150 @@ def ddg_links(session: requests.Session, query: str,
     return list(dict.fromkeys(out))[:limit]
 
 
+def _external_links(soup, own_hosts: tuple, limit: int) -> list[str]:
+    """Generic results page se external page/post links (engine ke
+    apne domains + utility paths chor kar)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    junk = ("/search?", "login", "signup", "sign-in", "settings",
+            "preferences", "/help", "/about", "privacy", "terms",
+            "cookies", "support.", "account.")
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if href.startswith("//"):
+            href = "https:" + href
+        if not href.startswith(("http://", "https://")):
+            continue
+        host = urllib.parse.urlparse(href).netloc.lower()
+        if any(h in host for h in own_hosts):
+            continue
+        if any(x in href.lower() for x in junk):
+            continue
+        key = href.split("#")[0]
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _engine_get(session, url: str, name: str):
+    from bs4 import BeautifulSoup
+    try:
+        r = session.get(url, timeout=15)
+        return BeautifulSoup(r.text, "html.parser")
+    except Exception as exc:
+        print(f"  [links:{name}] {type(exc).__name__}")
+        return None
+
+
+def google_links(session, query: str, limit: int = 10) -> list[str]:
+    """Google WEB results -> /url?q= wrappers se asal page links.
+    Datacenter IPs par aksar block hota hai — 0 aye to koi nuqsan
+    nahi, baqi engines chalte hain."""
+    soup = _engine_get(session, "https://www.google.com/search?q="
+                       + urllib.parse.quote_plus(query)
+                       + "&num=20&hl=en", "google")
+    if soup is None:
+        return []
+    out: list[str] = []
+    for a in soup.find_all("a", href=True):
+        h = a["href"]
+        if h.startswith("/url?"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(h).query)
+            u = (qs.get("q") or [""])[0]
+            if u.startswith("http") and "google." not in u:
+                out.append(u)
+    if not out:
+        out = _external_links(soup, ("google.", "gstatic."), limit)
+    return list(dict.fromkeys(out))[:limit]
+
+
+def brave_links(session, query: str, limit: int = 10) -> list[str]:
+    soup = _engine_get(session, "https://search.brave.com/search?q="
+                       + urllib.parse.quote_plus(query), "brave")
+    return [] if soup is None else _external_links(
+        soup, ("brave.com",), limit)
+
+
+def yahoo_links(session, query: str, limit: int = 10) -> list[str]:
+    soup = _engine_get(session, "https://search.yahoo.com/search?p="
+                       + urllib.parse.quote_plus(query), "yahoo")
+    if soup is None:
+        return []
+    out: list[str] = []
+    for a in soup.find_all("a", href=True):
+        h = a["href"]
+        m = re.search(r"RU=([^/]+)", h)
+        if m:
+            u = urllib.parse.unquote(m.group(1))
+            if u.startswith("http") and "yahoo." not in u:
+                out.append(u)
+    if not out:
+        out = _external_links(soup, ("yahoo.",), limit)
+    return list(dict.fromkeys(out))[:limit]
+
+
+def mojeek_links(session, query: str, limit: int = 10) -> list[str]:
+    soup = _engine_get(session, "https://www.mojeek.com/search?q="
+                       + urllib.parse.quote_plus(query), "mojeek")
+    return [] if soup is None else _external_links(
+        soup, ("mojeek.com",), limit)
+
+
+def ecosia_links(session, query: str, limit: int = 10) -> list[str]:
+    soup = _engine_get(session, "https://www.ecosia.org/search?q="
+                       + urllib.parse.quote_plus(query), "ecosia")
+    return [] if soup is None else _external_links(
+        soup, ("ecosia.org",), limit)
+
+
+ENGINES = [("Bing", bing_links), ("DuckDuckGo", ddg_links),
+           ("Google", google_links), ("Brave", brave_links),
+           ("Yahoo", yahoo_links), ("Mojeek", mojeek_links),
+           ("Ecosia", ecosia_links)]
+
+
 def discover_links(session: requests.Session, query: str,
-                   per_engine: int = 12) -> list[dict]:
-    """SEARCH ON SEARCH: engines se sirf LINKS uthao (query + facebook
-    + instagram variants taake posts bhi ayen). Images engine ki kabhi
-    nahi — har link ko hamara engine khud visit karega. Har link ke
-    saath ye bhi record hota hai ke kis ENGINE ne wo link diya (UI me
-    dikhaya jata hai)."""
+                   per_engine: int = 10) -> list[dict]:
+    """SEARCH ON SEARCH: SAARE engines se sirf LINKS uthao (query +
+    facebook + instagram variants taake posts bhi ayen). Images kisi
+    engine ki kabhi nahi — har link ko hamara engine khud visit
+    karega. Har link ke saath record hota hai ke kis ENGINE ne wo
+    link diya; per-engine ginati me 0 wale engines bhi dikhte hain
+    (konsa engine chala, konsa block hua — sab saaf)."""
+    from concurrent.futures import ThreadPoolExecutor as _TPE
     links: list[dict] = []
     seen: set[str] = set()
-    per: dict[str, int] = {}
-    for q in (query, f"{query} facebook", f"{query} instagram"):
-        for name, fn in (("DuckDuckGo", ddg_links), ("Bing", bing_links)):
-            for u in fn(session, q, per_engine):
+    per: dict[str, int] = {name: 0 for name, _ in ENGINES}
+    queries = (query, f"{query} facebook", f"{query} instagram")
+
+    def run_engine(args):
+        name, fn, q = args
+        local = requests.Session()
+        local.headers.update(HEADERS)
+        try:
+            return name, fn(local, q, per_engine)
+        except Exception:
+            return name, []
+
+    tasks = [(name, fn, q) for q in queries for name, fn in ENGINES]
+    with _TPE(max_workers=7) as ex:
+        for name, urls in ex.map(run_engine, tasks):
+            for u in urls:
                 key = u.split("#")[0]
                 if key not in seen and "duckduckgo.com" not in key:
                     seen.add(key)
                     links.append({"url": u, "engine": name})
-                    per[name] = per.get(name, 0) + 1
+                    per[name] += 1
     print(f"  [search-on-search] {len(links)} links mile {per} "
           f"(sirf links — images hamara engine nikale ga)")
-    return links[:48]
+    links_per = per
+    for item in links:
+        item.setdefault("engine", "")
+    discover_links.last_per_engine = links_per
+    return links[:60]
 
 
 def visit_links(session: requests.Session, links: list,
@@ -283,10 +409,11 @@ def harvest(query: str, sites: list[str] | None = None,
 
     links = discover_links(session, query)
     if on_event:
-        from collections import Counter
-        on_event("links", {
-            "total": len(links),
-            "per_engine": dict(Counter(l["engine"] for l in links))})
+        per_eng = getattr(discover_links, "last_per_engine", None)
+        if not per_eng:
+            from collections import Counter
+            per_eng = dict(Counter(l["engine"] for l in links))
+        on_event("links", {"total": len(links), "per_engine": per_eng})
     for item in visit_links(session, links):
         add(item)
     for item in youtube_search(session, query):

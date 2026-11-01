@@ -60,10 +60,14 @@ def looks_like_login_page(final_url: str, html: str) -> bool:
 
 
 def candidate_image_urls(soup: BeautifulSoup, page_url: str) -> list[str]:
+    import re as _re
     found: list[str] = []
     og = soup.find("meta", property="og:image")
     if og and og.get("content"):
         found.append(og["content"])
+    tw = soup.find("meta", attrs={"name": "twitter:image"})
+    if tw and tw.get("content"):
+        found.append(tw["content"])
     for img in soup.find_all("img"):
         src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
         if src:
@@ -73,9 +77,33 @@ def candidate_image_urls(soup: BeautifulSoup, page_url: str) -> list[str]:
             parts = [p.strip().split(" ")[0] for p in srcset.split(",") if p.strip()]
             if parts:
                 found.append(parts[-1])  # largest candidate is usually last
+    for source in soup.find_all("source"):
+        srcset = source.get("srcset")
+        if srcset:
+            parts = [p.strip().split(" ")[0] for p in srcset.split(",") if p.strip()]
+            if parts:
+                found.append(parts[-1])
+    # Videos: poster frame = us video ki image
+    for video in soup.find_all("video"):
+        if video.get("poster"):
+            found.append(video["poster"])
+    # Embedded videos (YouTube / Vimeo) -> un ke thumbnails
+    for frame in soup.find_all(["iframe", "embed"]):
+        src = frame.get("src") or ""
+        m = _re.search(r"youtube(?:-nocookie)?\.com/embed/([\w-]{11})", src)
+        if m:
+            found.append(f"https://i.ytimg.com/vi/{m.group(1)}/hqdefault.jpg")
+        m = _re.search(r"player\.vimeo\.com/video/(\d+)", src)
+        if m:
+            found.append(f"https://vumbnail.com/{m.group(1)}.jpg")
     for a in soup.find_all("a", href=True):
         if a["href"].lower().split("?")[0].endswith(IMAGE_EXTS):
             found.append(a["href"])
+        m = _re.search(r"youtube\.com/watch\?.*v=([\w-]{11})",
+                       a["href"])
+        if m:
+            found.append(f"https://i.ytimg.com/vi/{m.group(1)}"
+                         f"/hqdefault.jpg")
     # Resolve + dedupe, keep order
     seen, out = set(), []
     for item in found:

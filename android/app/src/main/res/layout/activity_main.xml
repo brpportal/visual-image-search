@@ -48,7 +48,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Is app ka backend tumhare apne phone par (local environment) chalta hai — ek dafa setup, phir hamesha local. Teen steps:"
+                    android:text="NAYA tareeqa (v2): engine ab app ke ANDAR hai — References tab se model download karo, Termux ki zaroorat khatam. Ye Setup sirf purane Termux backend ke liye hai:"
                     android:textColor="#94A3B8"
                     android:textSize="13.5sp" />
 
@@ -190,6 +190,223 @@
                     android:fontFamily="monospace" />
             </LinearLayout>
         </ScrollView>
+        <ScrollView
+            android:id="@+id/refsView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🖼 Meri References"
+                    android:textColor="#EEF2F7"
+                    android:textSize="21sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Ye wo images hain jin ko system internet par dhundhe ga. Har image add hone par us ki pehchan (embedding) phone par hi ban kar save ho jati hai."
+                    android:textColor="#94A3B8"
+                    android:textSize="13.5sp" />
+
+                <TextView
+                    android:id="@+id/modelStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Model check ho raha hai…"
+                    android:textColor="#FBBF24"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnDownloadModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="⬇ Model Download Karo (ek dafa)" />
+
+                <Button
+                    android:id="@+id/btnAddRef"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="➕ Reference Images Add Karo" />
+
+                <TextView
+                    android:id="@+id/refsStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="References: 0"
+                    android:textColor="#EEF2F7"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/refsList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </ScrollView>
+
+        <ScrollView
+            android:id="@+id/aiView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            android:padding="18dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🤖 AI — Deep Research"
+                    android:textColor="#EEF2F7"
+                    android:textSize="21sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="AI OPTIONAL hai — core system bagher AI ke bhi mukammal chalta hai. AI sirf results ki deep research/analysis ke liye hai. Apna kisi bhi platform ka Base URL + API Key dal do (OpenAI-compatible)."
+                    android:textColor="#94A3B8"
+                    android:textSize="13.5sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnPresetRouter"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="OpenRouter"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnPresetApmix"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:text="Apmix"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnPresetOpenAi"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:text="OpenAI"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Base URL"
+                    android:textColor="#94A3B8"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/editAiBase"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="#EEF2F7"
+                    android:textColorHint="#64748B"
+                    android:hint="https://openrouter.ai/api/v1"
+                    android:inputType="textUri"
+                    android:singleLine="true" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="API Key (phone par encrypted save hoti hai)"
+                    android:textColor="#94A3B8"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/editAiKey"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="#EEF2F7"
+                    android:textColorHint="#64748B"
+                    android:hint="sk-…"
+                    android:inputType="textPassword"
+                    android:singleLine="true" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Model ka naam"
+                    android:textColor="#94A3B8"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/editAiModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="#EEF2F7"
+                    android:textColorHint="#64748B"
+                    android:hint="masalan: openai/gpt-4o-mini"
+                    android:inputType="text"
+                    android:singleLine="true" />
+
+                <Button
+                    android:id="@+id/btnAiSave"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="💾 AI Setting Save Karo" />
+
+                <Button
+                    android:id="@+id/btnAiFetch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Models Ki List Lao" />
+
+                <Button
+                    android:id="@+id/btnAiTest"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="AI Test Karo" />
+
+                <TextView
+                    android:id="@+id/aiStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="AI status yahan ayega…"
+                    android:textColor="#A7F3EA"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+        </ScrollView>
     </FrameLayout>
 
     <LinearLayout
@@ -204,22 +421,43 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🔎 Scan" />
+            android:text="🔎 Scan"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/navRefs"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="🖼 Refs"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/navAi"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="🤖 AI"
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/navSetup"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="🔧 Setup" />
+            android:layout_marginStart="4dp"
+            android:text="🔧 Setup"
+            android:textSize="11sp" />
 
         <Button
             android:id="@+id/navSettings"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="⚙️ Settings" />
+            android:layout_marginStart="4dp"
+            android:text="⚙️ Settings"
+            android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>

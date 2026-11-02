@@ -13,3 +13,6 @@ data/
 references/
 references-islamic/
 demo/
+
+# ONNX models — GitHub Release assets hain, git me nahi
+models/

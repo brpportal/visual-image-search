@@ -40,10 +40,11 @@ jobs:
           name: ImageScan-apk
           path: ImageScan.apk
 
-      - name: Publish release app-v1.0
+      - name: Publish release app-v2.0
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: app-v1.0
-          name: Image Scan App v1.0
+          tag_name: app-v2.0
+          name: Image Scan App v2.0
+          body: "v2.0 foundation — on-device CLIP engine (model pehli dafa app ke andar download hota hai, ~154 MB INT8), References page (apni images + embeddings phone par), AI settings (custom Base URL + API Key + Model, optional). Scan tab abhi purane backend se chalta hai; in-app scan engine v2.1 me ayega."
           files: ImageScan.apk
           fail_on_unmatched_files: true

@@ -1,0 +1,12 @@
+# Termux (Android) backend requirements — faiss-cpu yahan NAHI hai
+# (us ka Android/aarch64 wheel nahi banta). SCAN ke tamam modes
+# (Overall / Image / URL) faiss ke baghair chalte hain; sirf purana
+# pre-indexed "My Index" mode faiss mangta hai.
+fastapi
+uvicorn
+python-multipart
+open_clip_torch
+pillow
+imagehash
+requests
+beautifulsoup4

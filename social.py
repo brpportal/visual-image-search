@@ -47,14 +47,89 @@ def _session(headers: dict | None = None) -> requests.Session:
     return s
 
 
-def _fetch(url: str, headers: dict | None = None) -> str | None:
+def _fetch(url: str, headers: dict | None = None,
+           timeout: int = 25) -> str | None:
     try:
-        r = _session(headers).get(url, timeout=25)
+        r = _session(headers).get(url, timeout=timeout)
         return r.text
     except Exception as exc:
         print(f"  [social:error] {url[:70]}: {type(exc).__name__} "
               f"{str(exc)[:90]}")
         return None
+
+
+def _extract_fb(doc: str, url: str) -> list[dict]:
+    doc = doc.replace("\\u0026", "&").replace("\\/", "/")
+    urls = list(dict.fromkeys(re.findall(
+        r'https://[^"\' ]*?fbcdn\.net[^"\' ]*?\.(?:jpg|jpeg|png|webp)'
+        r'(?:\?[^"\' ]*)?', doc)))
+    urls = [u for u in urls if "/rsrc.php/" not in u]
+    urls += [u for u in dict.fromkeys(re.findall(
+        r'https://lookaside\.fbsbx\.com/[^"\' ]+', doc))
+        if u not in urls]
+    out = []
+    og = _og(doc, "image")
+    title = _og(doc, "title") or "Facebook"
+    if og:
+        out.append({"image_url": og, "source_url": url, "title": title})
+    for u in urls:
+        if u != og:
+            out.append({"image_url": u, "source_url": url,
+                        "title": title})
+        if len(out) >= MAX_PER_SOURCE:
+            break
+    return out
+
+
+def _extract_ig(doc: str, url: str) -> list[dict]:
+    doc = doc.replace("\\u0026", "&").replace("\\/", "/")
+    # Asli photo CDN URLs (scontent / cdninstagram) — static interface
+    # graphics nahi.
+    urls = list(dict.fromkeys(re.findall(
+        r'https://[^"\' ]*?(?:scontent|cdninstagram)[^"\' ]*?'
+        r'\.(?:jpg|jpeg|webp)(?:\?[^"\' ]*)?', doc)))
+    urls = [u for u in urls if "static.cdninstagram" not in u
+            and "/rsrc" not in u]
+    out = []
+    og = _og(doc, "image")
+    title = _og(doc, "title") or "Instagram"
+    if og:
+        out.append({"image_url": og, "source_url": url, "title": title})
+    for u in urls:
+        if u != og:
+            out.append({"image_url": u, "source_url": url,
+                        "title": title})
+        if len(out) >= MAX_PER_SOURCE:
+            break
+    return out
+
+
+def _fetch_best(url: str, variants: list[str], extractor,
+                label: str) -> list[dict]:
+    """Strategy chain: pehle crawler UA, phir browser UA, phir host
+    variants (m./mbasic./embed) — jo pehle KAFI images de, wahi jeeta.
+    Kisi profile par images ayen aur kisi par na ayen wala masla isi
+    chain se hal hota hai: har profile ek hi shakl me nahi khulta."""
+    best: list[dict] = []
+    strategies: list[tuple[str, dict | None]] = []
+    for v in variants:
+        strategies.append((v, CRAWLER_HEADERS))
+        strategies.append((v, None))
+    for v, headers in strategies:
+        html = _fetch(v, headers, timeout=15)
+        if html is None:
+            continue
+        got = extractor(html, url)
+        if len(got) > len(best):
+            best = got
+        if len(best) >= 8:
+            break
+    if not best:
+        print(f"  [{label}] no public images at {url[:70]} "
+              f"(login wall or JS-only page)")
+    else:
+        print(f"  [{label}] {len(best)} public images from {url[:70]}")
+    return best
 
 
 def _og(html: str, prop: str) -> str:
@@ -102,62 +177,30 @@ def youtube_images(url: str) -> list[dict]:
 
 
 def instagram_images(url: str) -> list[dict]:
-    # Crawler UA first: profiles serve OG + scontent photos to crawlers
-    # (link previews) while browsers get a login wall.
-    html = _fetch(url, CRAWLER_HEADERS)
-    if html is None:
-        return []
-    doc = html.replace("\\u0026", "&").replace("\\/", "/")
-    # Only real photo CDN URLs (scontent…) — static.cdninstagram.com/rsrc
-    # files are Instagram's own interface graphics, not user photos.
-    urls = list(dict.fromkeys(re.findall(
-        r'https://scontent[^"\' ]+?\.(?:jpg|jpeg|webp)(?:\?[^"\' ]*)?', doc)))
-    out = []
-    og = _og(html, "image")
-    title = _og(html, "title") or "Instagram"
-    if og:
-        out.append({"image_url": og, "source_url": url, "title": title})
-    for u in urls:
-        if u != og:
-            out.append({"image_url": u, "source_url": url, "title": title})
-        if len(out) >= MAX_PER_SOURCE:
-            break
-    if not out:
-        print(f"  [instagram] no public images at {url[:70]} "
-              f"(login wall or JS-only page)")
-    else:
-        print(f"  [instagram] {len(out)} public images from {url[:70]}")
-    return out
+    # Strategy chain: crawler UA -> browser UA -> post embed page.
+    # Profiles link-preview (crawler) ko OG + scontent dete hain;
+    # kuch profiles sirf doosri shakl me khulte hain.
+    variants = [url]
+    m = re.search(r"instagram\.com/(p|reel)/([\w-]+)", url)
+    if m:
+        variants.append(
+            f"https://www.instagram.com/{m.group(1)}/{m.group(2)}/embed/")
+    elif "?" not in url:
+        variants.append(url.rstrip("/") + "/?hl=en")
+    return _fetch_best(url, variants, _extract_ig, "instagram")
 
 
 def facebook_images(url: str) -> list[dict]:
-    # Crawler UA first: pages AND posts serve og:image/og:title (the
-    # lookaside crawler media) without login; a browser UA gets a wall.
-    html = _fetch(url, CRAWLER_HEADERS)
-    if html is None:
-        return []
-    doc = html.replace("\\u0026", "&").replace("\\/", "/")
-    urls = list(dict.fromkeys(re.findall(
-        r'https://scontent[^"\' ]*?fbcdn\.net[^"\' ]*?\.(?:jpg|jpeg|png)'
-        r'(?:\?[^"\' ]*)?', doc)))
-    urls += [u for u in dict.fromkeys(re.findall(
-        r'https://lookaside\.fbsbx\.com/[^"\' ]+', doc)) if u not in urls]
-    out = []
-    og = _og(html, "image")
-    title = _og(html, "title") or "Facebook"
-    if og:
-        out.append({"image_url": og, "source_url": url, "title": title})
-    for u in urls:
-        if u != og:
-            out.append({"image_url": u, "source_url": url, "title": title})
-        if len(out) >= MAX_PER_SOURCE:
-            break
-    if not out:
-        print(f"  [facebook] no public images at {url[:70]} "
-              f"(login wall or JS-only page)")
-    else:
-        print(f"  [facebook] {len(out)} public images from {url[:70]}")
-    return out
+    # Strategy chain: crawler UA -> browser UA -> m.facebook ->
+    # mbasic.facebook (mbasic purani saadgi wali HTML deta hai jisme
+    # images seedhi mil jati hain).
+    variants = [url]
+    p = urlparse(url)
+    if p.netloc.endswith("facebook.com") and \
+            not p.netloc.startswith(("m.", "mbasic.")):
+        variants.append(f"https://m.facebook.com{p.path}")
+        variants.append(f"https://mbasic.facebook.com{p.path}")
+    return _fetch_best(url, variants, _extract_fb, "facebook")
 
 
 ADAPTERS = {"youtube": youtube_images,

@@ -91,6 +91,25 @@
   .ogpanel .od { color: var(--mut); font-size: 12.5px; margin-top: 4px; line-height: 1.5; }
   .ogpanel .om { color: #64748b; font-size: 11.5px; margin-top: 5px; }
   .dims { font-size: 11px; padding: 2.5px 8px; border-radius: 999px; background: rgba(196,181,253,.15); color: #c4b5fd; }
+  .lightbox { display: none; position: fixed; inset: 0; z-index: 90; overflow-y: auto;
+              background: rgba(4,8,13,.96); padding: 14px 14px 30px; }
+  .lightbox.on { display: block; }
+  .lb-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+             max-width: 860px; margin: 0 auto 10px; }
+  .lb-head span { font-size: 14.5px; font-weight: 700; line-height: 1.4; }
+  .lb-head button { padding: 8px 13px; border-radius: 10px; border: 1px solid var(--line);
+                    background: rgba(255,255,255,.07); color: var(--txt); font-size: 15px; cursor: pointer; }
+  #lb-img { display: block; max-width: 860px; width: 100%; max-height: 58vh; object-fit: contain;
+            margin: 0 auto; border-radius: 12px; background: #070b11; }
+  .lb-actions { display: flex; gap: 8px; justify-content: center; margin: 13px auto 4px; max-width: 860px; }
+  .lb-actions button { padding: 12px 18px; border-radius: 12px; border: 0; cursor: pointer;
+                       font-weight: 800; font-size: 14px;
+                       background: linear-gradient(90deg, var(--acc), var(--acc2)); color: #04160b; }
+  .lb-actions a button { background: rgba(255,255,255,.08); color: var(--txt); border: 1px solid var(--line); }
+  .lb-simlabel { max-width: 860px; margin: 18px auto 8px; font-weight: 800; font-size: 14px; color: var(--mut); }
+  .lb-sim { display: flex; gap: 9px; overflow-x: auto; max-width: 860px; margin: 0 auto; padding-bottom: 6px; }
+  .lb-sim img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; cursor: pointer;
+                border: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -155,6 +174,17 @@
   <button data-panel="panel-url">🔗 URL Scan</button>
 </div>
 
+<div class="lightbox" id="lightbox">
+  <div class="lb-head"><span id="lb-title"></span><button id="lb-close">✕ Band</button></div>
+  <img id="lb-img" alt="">
+  <div class="lb-actions">
+    <button id="lb-download">⬇ Download Karo</button>
+    <a id="lb-source" target="_blank" rel="noopener"><button type="button">🔗 Source Page</button></a>
+  </div>
+  <div class="lb-simlabel">Similar Images</div>
+  <div class="lb-sim" id="lb-sim"></div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -198,12 +228,14 @@ function renderResults(gridEl, data, matchWord) {
   const step = () => {
     const st = gridState[gridEl.id];
     const next = st.items.slice(st.shown, st.shown + PAGE);
-    for (const item of next) {
+    next.forEach((item, k) => {
       const a = document.createElement('a');
       a.href = item.source_url; a.target = '_blank'; a.rel = 'noopener';
       a.innerHTML = cardHTML(item, st.matchWord);
+      const gi = st.shown + k;
+      a.addEventListener('click', e => { e.preventDefault(); openLightbox(gridEl.id, gi); });
       gridEl.appendChild(a);
-    }
+    });
     st.shown += next.length;
     if (st.shown < st.items.length) {
       moreBtn.style.display = 'block';
@@ -306,6 +338,57 @@ document.querySelectorAll('.bottombar button').forEach(b => {
     document.getElementById(b.dataset.panel).style.display = 'block';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
+});
+
+let lbCtx = { grid: null, idx: 0 };
+
+function openLightbox(gridId, idx) {
+  const st = gridState[gridId];
+  if (!st || !st.items[idx]) return;
+  lbCtx = { grid: gridId, idx };
+  const item = st.items[idx];
+  $('lb-img').src = item.thumb_url;
+  $('lb-title').textContent = (item.title || 'Image') +
+    (item.score !== null && item.score !== undefined ? ` · ${item.score}%` : '') +
+    (item.w ? ` · ${item.w}×${item.h}` : '');
+  $('lb-source').href = item.source_url;
+  const sim = $('lb-sim');
+  sim.innerHTML = '';
+  const sims = (item.similar || []).filter(j => st.items[j]);
+  if (!sims.length) {
+    sim.innerHTML = '<span style="color:#64748b;font-size:12.5px">Is set me is jaisi aur image nahi mili</span>';
+  }
+  for (const j of sims) {
+    const im = document.createElement('img');
+    im.src = st.items[j].thumb_url;
+    im.loading = 'lazy';
+    im.addEventListener('click', () => openLightbox(gridId, j));
+    sim.appendChild(im);
+  }
+  $('lightbox').classList.add('on');
+  $('lightbox').scrollTop = 0;
+}
+
+async function downloadImage(url) {
+  try {
+    const r = await fetch(url);
+    const b = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'image-' + Date.now() + '.jpg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (e) {
+    window.open(url, '_blank');
+  }
+}
+
+$('lb-close').addEventListener('click', () => $('lightbox').classList.remove('on'));
+$('lb-download').addEventListener('click', () => {
+  const st = gridState[lbCtx.grid];
+  if (st && st.items[lbCtx.idx]) downloadImage(st.items[lbCtx.idx].thumb_url);
 });
 
 $('f3').addEventListener('submit', e => {

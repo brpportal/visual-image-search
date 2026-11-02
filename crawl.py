@@ -104,6 +104,30 @@ def candidate_image_urls(soup: BeautifulSoup, page_url: str) -> list[str]:
         if m:
             found.append(f"https://i.ytimg.com/vi/{m.group(1)}"
                          f"/hqdefault.jpg")
+    # Lazy-load wale extra attributes (data-original, data-zoom,
+    # data-full, data-large waghera) — kai sites asal image yahin
+    # rakhti hain, src me chhota placeholder hota hai.
+    for img in soup.find_all("img"):
+        for attr, val in img.attrs.items():
+            if attr.startswith("data-") and isinstance(val, str) \
+                    and val.lower().split("?")[0].endswith(IMAGE_EXTS):
+                found.append(val)
+    raw = str(soup)
+    # <noscript> ke andar wali images (JS-off par dikhne wali)
+    for ns in _re.findall(r"<noscript>(.*?)</noscript>", raw, _re.S):
+        for src in _re.findall(r'src="([^"]+)"', ns):
+            if src.lower().split("?")[0].endswith(IMAGE_EXTS):
+                found.append(src)
+    # Inline style background-image
+    for bg in _re.findall(r"background(?:-image)?\s*:\s*url\(([^)]+)\)",
+                          raw):
+        u = bg.strip("\"' ")
+        if u.lower().split("?")[0].endswith(IMAGE_EXTS):
+            found.append(u)
+    # JSON-LD / structured data ke image fields
+    for ju in _re.findall(r'"image"\s*:\s*"(https?://[^"]+)"', raw):
+        if ju.lower().split("?")[0].endswith(IMAGE_EXTS):
+            found.append(ju)
     # Resolve + dedupe, keep order
     seen, out = set(), []
     for item in found:

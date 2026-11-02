@@ -38,6 +38,45 @@ DEFAULT_K = 50
 
 app = FastAPI(title="Visual Image Search (self-hosted)")
 
+# ---- Logs buffer: server ke prints yahan bhi jama hote hain taake
+# Android app / web Settings se /logs par kabhi bhi dekhe ja saken.
+import sys as _sys
+
+LOG_BUFFER: list[str] = []
+
+
+class _Tee:
+    def __init__(self, orig):
+        self._orig = orig
+
+    def write(self, s):
+        try:
+            self._orig.write(s)
+        except Exception:
+            pass
+        for line in str(s).splitlines():
+            if line.strip():
+                LOG_BUFFER.append(line.rstrip())
+                if len(LOG_BUFFER) > 400:
+                    del LOG_BUFFER[:-400]
+        return len(s)
+
+    def flush(self):
+        try:
+            self._orig.flush()
+        except Exception:
+            pass
+
+
+_sys.stdout = _Tee(_sys.stdout)
+
+
+@app.get("/logs")
+def logs(n: int = 200):
+    """Aakhri server log lines (app ke Settings > Logs ke liye)."""
+    return {"lines": LOG_BUFFER[-max(1, min(n, 400)):]}
+
+
 _index = None
 _index_lock = threading.Lock()
 _model_ready = threading.Event()
@@ -220,6 +259,23 @@ def _result_item(d: dict, score: float) -> dict:
             "source_url": d["source_url"], "title": d["title"]}
 
 
+def _attach_similars(results: list[dict], vecs_kept) -> list[dict]:
+    """Har result ke saath usi result-set ki sab se milti-julti
+    images ke index — image kholne par neeche 'Similar Images'
+    dikhane ke liye."""
+    import numpy as _np
+    if len(results) < 2 or vecs_kept is None or len(vecs_kept) < 2:
+        for r in results:
+            r["similar"] = []
+        return results
+    sims = vecs_kept @ vecs_kept.T
+    for i, r in enumerate(results):
+        order = _np.argsort(-sims[i])
+        r["similar"] = [int(j) for j in order
+                        if j != i and sims[i][j] >= 0.45][:4]
+    return results
+
+
 def _top_kept(ok, vecs, scores, topn=TOP_RESULTS):
     order = sorted(range(len(ok)), key=lambda i: -scores[i])
     kept, kept_idx = [], []
@@ -265,7 +321,9 @@ def _scan_compute(q: str, limit: int = 200, on_event=None,
     scores = (vecs @ qv).tolist()
     kept = _top_kept(ok, vecs, scores)
     result = {"query": q, "counts": counts, "total": len(ok),
-              "results": [_result_item(ok[i], scores[i]) for i in kept]}
+              "results": _attach_similars(
+                  [_result_item(ok[i], scores[i]) for i in kept],
+                  vecs[kept])}
     _SCAN_CACHE[key] = (time.time(), result)
     return result
 
@@ -308,7 +366,9 @@ def _imagescan_compute(ref, query: str, limit: int = 180,
                 scores[i] = vs[j]
     kept = _top_kept(ok, vecs, scores)
     return {"query": query, "counts": counts, "total": len(ok),
-            "results": [_result_item(ok[i], scores[i]) for i in kept]}
+            "results": _attach_similars(
+                [_result_item(ok[i], scores[i]) for i in kept],
+                vecs[kept])}
 
 
 def _parse_sites(sites: str | None) -> list | None:
@@ -417,12 +477,19 @@ def _urlscan_compute(url: str, on_event=None) -> dict:
         on_event("harvested", dict(Counter(i["origin"] for i in items)))
     ok = _download_enough(items, want_ok=len(items) or 1,
                           max_try=min(len(items), 200))
-    results = [{"score": None, "origin": d["origin"], "via": "",
-                "thumb_url": d["image_url"], "source_url": url,
-                "title": d.get("title", ""),
-                "w": d["img"].width, "h": d["img"].height}
-               for d in ok]
-    results.sort(key=lambda r: -(r["w"] * r["h"]))
+    pairs = [({"score": None, "origin": d["origin"], "via": "",
+               "thumb_url": d["image_url"], "source_url": url,
+               "title": d.get("title", ""),
+               "w": d["img"].width, "h": d["img"].height}, d["img"])
+             for d in ok]
+    pairs.sort(key=lambda p: -(p[0]["w"] * p[0]["h"]))
+    results = [p[0] for p in pairs]
+    if len(pairs) >= 2:  # similar images ke liye embeddings
+        vecs_all = core.embed_pil_images([p[1] for p in pairs])
+        _attach_similars(results, vecs_all)
+    else:
+        for r in results:
+            r["similar"] = []
     return {"url": url, "meta": meta,
             "counts": {items[0]["origin"] if items else "url":
                        len(items)},

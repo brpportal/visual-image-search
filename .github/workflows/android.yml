@@ -1,5 +1,8 @@
 name: Android App (Image Scan)
 
+permissions:
+  contents: write
+
 on:
   push:
     paths:

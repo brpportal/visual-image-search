@@ -5,7 +5,7 @@ Run make_samples.py + index.py first, start the server, then:
     python test_search.py [base_url]
 
 Checks:
-  1. /health reports 19 indexed vectors (20 samples minus the corrupt one)
+  1. /health reports status "ok" and indexed_images count (null if unloaded)
   2. Text search "green tree in a field" -> sample 03 on top
   3. Image search with sample-03.jpg -> sample 03 first with score ~100
   4. Near-duplicate sample 19 must NOT appear next to sample 03 (>0.98 rule)
@@ -59,8 +59,10 @@ def post_image(path: str, filename: str):
 
 health = get("/health")
 print("health:", health)
-check("health.index_vectors == 19", health.get("index_vectors") == 19,
-      f"got {health.get('index_vectors')}")
+check("health.status == 'ok'", health.get("status") == "ok",
+      f"got {health.get('status')}")
+check("health contract (exactly status and indexed_images)",
+      set(health.keys()) == {"status", "indexed_images"})
 
 import urllib.parse
 
@@ -75,6 +77,10 @@ check("text search top = the tree image (sample 03 or its copy 19)",
       text_results[0]["source_url"] if text_results else "none")
 check("text search shows exactly one copy of the tree image",
       len(tree_hits) == 1, f"{len(tree_hits)} copies")
+
+post_health = get("/health")
+check("post_health.indexed_images == 19", post_health.get("indexed_images") == 19,
+      f"got {post_health.get('indexed_images')}")
 
 status, img_results = post_image(os.path.join(HERE, "data", "images", "sample-03.jpg"),
                                  "sample-03.jpg")

@@ -10,7 +10,7 @@ Endpoints:
   GET  /thumb/{id}      cached 320px JPEG thumbnail
   GET  /images/...      original files (StaticFiles over data/images)
   GET  /                the search frontend
-  GET  /health          status: metadata count, index size, model state
+  GET  /health          status: "ok" and indexed_images count (null if unloaded)
 
 Near-duplicate rule: after ranking, a result is dropped if its embedding is
 > 0.98 cosine-similar to an already-kept result (the same photo re-hosted
@@ -139,26 +139,16 @@ def _warm_model() -> None:
             core.get_model()
             _model_ready.set()
         except Exception:
-            pass  # /health reports model state; first search retries the load
+            pass  # first search retries the load
 
     threading.Thread(target=_load, daemon=True).start()
 
 
 @app.get("/health")
 def health() -> dict:
-    core.init_db()
-    with core.connect() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM images").fetchone()[0]
-        indexed = conn.execute(
-            "SELECT COUNT(*) FROM images WHERE indexed = 1").fetchone()[0]
-    index = get_index()
     return {
         "status": "ok",
-        "images_in_db": total,
-        "images_indexed": indexed,
-        "index_vectors": int(index.ntotal) if index is not None else 0,
-        "model_loaded": _model_ready.is_set(),
-        "model": f"{core.MODEL_NAME} ({core.PRETRAINED})",
+        "indexed_images": int(_index.ntotal) if _index is not None else None,
     }
 
 

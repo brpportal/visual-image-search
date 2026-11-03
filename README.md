@@ -75,6 +75,16 @@ Keep the Termux session alive while serving (Termux: `termux-wake-lock`
 helps). To use it again tomorrow: `proot-distro login ubuntu`, `cd
 visual-image-search`, `bash run.sh`.
 
+### Health check
+
+`GET /health` returns a read-only JSON status with the loaded index count:
+
+```json
+{"status": "ok", "indexed_images": 19}
+```
+
+If the index is not loaded, `indexed_images` is `null`. The endpoint does not load or mutate the index.
+
 ## Live web search (no index needed)
 
 The server's default mode is **Live Web**: type any query and the engines
